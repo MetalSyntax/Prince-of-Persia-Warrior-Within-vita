@@ -27,7 +27,7 @@
 #include <math.h>
 #include <math_neon.h>
 
-#ifdef HAVE_SOFTFP_ABI
+#if defined(HAVE_SOFTFP_ABI) && !defined(VITASDK_SOFTFP_LIBS)
 #define VGL_HARDFP __attribute__((pcs("aapcs-vfp")))
 #else
 #define VGL_HARDFP

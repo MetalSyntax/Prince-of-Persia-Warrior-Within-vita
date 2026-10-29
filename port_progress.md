@@ -361,6 +361,10 @@ Through extensive disassembly and symbol inspection of the decrypted 11.2 MB exe
   - Crash: `gameswf::hash<tu_stringi,as_value>::set_raw_capacity` pidió `1<<22` entradas → `SwfAlloc` NULL. El hash del dump estaba sano (`entry_count=6, size_mask=7` → debía pedir 16). Causa: `darwin.c` declaraba los `host_*` de libm con `pcs("aapcs-vfp")`, pero la libm linkeada es softfp (sin `Tag_ABI_VFP_args`) → `log()` leía basura. Afectaba a TODAS las funciones matemáticas del juego. Fix: quitar el atributo.
   - `fopen` en lectura que no encuentra el archivo (sondeo de saves/perfiles en primer arranque) pasa a `l_debug`; los fallos en escritura siguen como WARN.
   - Pendiente (siguiente corrida): vídeo mp4v a 1.2 fps con imagen negra (readback 16,16,16) y `could not start the cutscene audio thread`.
+- **Iteration 016 (log 016 + dump 1793308519):** crash en vitaGL `glRotatef` → `sincosf_c` (libmathneon) con R0 basura.
+  - Causa raíz común con 015: los VPK de 015/016 se compilaron en el Mac, que tiene **vitasdk-softfp** (`--with-float=softfp`: libm y libmathneon softfp). El código asumía el vitasdk estándar de WSL (libs hardfp) y forzaba `pcs("aapcs-vfp")` en `darwin.c` (`HARDFP`) y en vitaGL (`VGL_HARDFP`). El "fix" de 015 (quitar HARDFP) solo valía para el Mac y rompía WSL.
+  - Fix: `CMakeLists.txt` detecta el toolchain (`gcc -v` → `with-float=softfp`) y define `VITASDK_SOFTFP_LIBS` + pasa `SOFTFP_LIBS=1` a vitaGL; `HARDFP`/`VGL_HARDFP` quedan vacíos solo en ese caso. `SOFTFP_ABI=1` se mantiene (el wrapper `sceGxmSetViewport_sfp` es por el ABI del SO, que siempre es hard).
+  - Probable que la imagen negra del vídeo venga de lo mismo (las matrices de vitaGL usan math_neon con `VGL_HARDFP`): verificar en la próxima corrida.
 
 ---
 

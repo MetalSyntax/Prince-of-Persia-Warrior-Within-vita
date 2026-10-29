@@ -662,40 +662,45 @@ static unsigned long long ull_mod(unsigned long long a, unsigned long long b) { 
 static int ll_cmp(long long a, long long b) { return a < b ? 0 : a == b ? 1 : 2; }
 
 
-// Host libm, same softfp ABI as the rest of the build (libm has no Tag_ABI_VFP_args). Forcing
-// pcs("aapcs-vfp") here passed args in d0 while log() read r0:r1: log2(15) came out ~21 and
-// gameswf hash::set_raw_capacity asked for 1<<22 entries -> NULL from SwfAlloc (log 015).
-extern float  host_acosf(float) __asm__("acosf");
-extern float  host_cosf(float) __asm__("cosf");
-extern float  host_sinf(float) __asm__("sinf");
-extern float  host_tanf(float) __asm__("tanf");
-extern float  host_expf(float) __asm__("expf");
-extern float  host_logf(float) __asm__("logf");
-extern float  host_log10f(float) __asm__("log10f");
-extern float  host_floorf(float) __asm__("floorf");
-extern long   host_lrintf(float) __asm__("lrintf");
-extern float  host_asinf(float) __asm__("asinf");
-extern float  host_atanf(float) __asm__("atanf");
-extern float  host_ceilf(float) __asm__("ceilf");
-extern float  host_roundf(float) __asm__("roundf");
+// Host libm ABI depends on the toolchain: standard vitasdk ships hardfp libs, vitasdk-softfp
+// (--with-float=softfp, detected in CMakeLists.txt) ships softfp ones. A mismatch makes every
+// libm call return garbage (log 015: log2(15) ~21 -> gameswf asked for a 240MB hash table).
+#ifdef VITASDK_SOFTFP_LIBS
+#define HARDFP
+#else
+#define HARDFP __attribute__((pcs("aapcs-vfp")))
+#endif
+HARDFP extern float  host_acosf(float) __asm__("acosf");
+HARDFP extern float  host_cosf(float) __asm__("cosf");
+HARDFP extern float  host_sinf(float) __asm__("sinf");
+HARDFP extern float  host_tanf(float) __asm__("tanf");
+HARDFP extern float  host_expf(float) __asm__("expf");
+HARDFP extern float  host_logf(float) __asm__("logf");
+HARDFP extern float  host_log10f(float) __asm__("log10f");
+HARDFP extern float  host_floorf(float) __asm__("floorf");
+HARDFP extern long   host_lrintf(float) __asm__("lrintf");
+HARDFP extern float  host_asinf(float) __asm__("asinf");
+HARDFP extern float  host_atanf(float) __asm__("atanf");
+HARDFP extern float  host_ceilf(float) __asm__("ceilf");
+HARDFP extern float  host_roundf(float) __asm__("roundf");
 
-extern double host_acos(double) __asm__("acos");
-extern double host_asin(double) __asm__("asin");
-extern double host_atan(double) __asm__("atan");
-extern double host_atan2(double, double) __asm__("atan2");
-extern double host_ceil(double) __asm__("ceil");
-extern double host_cos(double) __asm__("cos");
-extern double host_exp(double) __asm__("exp");
-extern double host_floor(double) __asm__("floor");
-extern double host_fmod(double, double) __asm__("fmod");
-extern double host_ldexp(double, int) __asm__("ldexp");
-extern double host_log(double) __asm__("log");
-extern double host_log10(double) __asm__("log10");
-extern double host_pow(double, double) __asm__("pow");
-extern double host_sin(double) __asm__("sin");
-extern double host_tan(double) __asm__("tan");
-extern double host_fmax(double, double) __asm__("fmax");
-extern double host_fmin(double, double) __asm__("fmin");
+HARDFP extern double host_acos(double) __asm__("acos");
+HARDFP extern double host_asin(double) __asm__("asin");
+HARDFP extern double host_atan(double) __asm__("atan");
+HARDFP extern double host_atan2(double, double) __asm__("atan2");
+HARDFP extern double host_ceil(double) __asm__("ceil");
+HARDFP extern double host_cos(double) __asm__("cos");
+HARDFP extern double host_exp(double) __asm__("exp");
+HARDFP extern double host_floor(double) __asm__("floor");
+HARDFP extern double host_fmod(double, double) __asm__("fmod");
+HARDFP extern double host_ldexp(double, int) __asm__("ldexp");
+HARDFP extern double host_log(double) __asm__("log");
+HARDFP extern double host_log10(double) __asm__("log10");
+HARDFP extern double host_pow(double, double) __asm__("pow");
+HARDFP extern double host_sin(double) __asm__("sin");
+HARDFP extern double host_tan(double) __asm__("tan");
+HARDFP extern double host_fmax(double, double) __asm__("fmax");
+HARDFP extern double host_fmin(double, double) __asm__("fmin");
 
 SOFTFP static float m_acosf(float x) { return host_acosf(x); }
 SOFTFP static float m_cosf(float x) { return host_cosf(x); }

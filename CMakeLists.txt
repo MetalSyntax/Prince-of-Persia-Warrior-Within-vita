@@ -26,6 +26,14 @@ endif()
 ## vitaGL vendorizada con compilación en softfp (OBLIGATORIO para evitar pantalla negra en PS Vita)
 set(VITAGL_VENDOR_DIR ${CMAKE_CURRENT_SOURCE_DIR}/vendor/vitaGL)
 set(VITAGL_MAKE_FLAGS_STR "SOFTFP_ABI=1 NO_DEBUG=1 HAVE_SHADER_CACHE=1 NO_SPLASHSCREEN=1 HAVE_GLSL_UBOS=1 SAMPLERS_SPEEDHACK=1 DRAW_SPEEDHACK=2")
+# vitasdk-softfp (--with-float=softfp) ships softfp libm/libmathneon: calling them with
+# pcs("aapcs-vfp") (vitaGL math_utils.h VGL_HARDFP, darwin.c HARDFP) passes floats in the wrong registers.
+execute_process(COMMAND ${CMAKE_C_COMPILER} -v ERROR_VARIABLE VITA_GCC_V OUTPUT_QUIET)
+if (VITA_GCC_V MATCHES "with-float=softfp")
+  message(STATUS "vitasdk-softfp toolchain: softfp libs")
+  add_definitions(-DVITASDK_SOFTFP_LIBS)
+  set(VITAGL_MAKE_FLAGS_STR "${VITAGL_MAKE_FLAGS_STR} SOFTFP_LIBS=1")
+endif()
 separate_arguments(VITAGL_MAKE_FLAGS UNIX_COMMAND "${VITAGL_MAKE_FLAGS_STR}")
 include(ExternalProject)
 ExternalProject_Add(

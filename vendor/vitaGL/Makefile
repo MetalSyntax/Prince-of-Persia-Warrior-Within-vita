@@ -20,6 +20,11 @@ ifeq ($(SOFTFP_ABI),1)
 CFLAGS += -mfloat-abi=softfp -DHAVE_SOFTFP_ABI
 endif
 
+# vitasdk-softfp: libmathneon is softfp too, so its calls must not be forced to aapcs-vfp
+ifeq ($(SOFTFP_LIBS),1)
+CFLAGS += -DVITASDK_SOFTFP_LIBS
+endif
+
 ifeq ($(NO_DEBUG),1)
 CFLAGS += -DSKIP_ERROR_HANDLING
 endif
