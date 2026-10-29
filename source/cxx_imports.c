@@ -1,0 +1,152 @@
+// Generado por tools/gen_cxx_imports.py: imports C++ del juego -> libstdc++ de VitaSDK (no editar).
+// Sin equivalente: ninguno
+#include "imports.h"
+
+extern char _ZN9__gnu_cxx12__atomic_addEPVii[];
+extern char _ZN9__gnu_cxx18__exchange_and_addEPVii[];
+extern char _ZNKSs3endEv[];
+extern char _ZNKSs4findEPKcjj[];
+extern char _ZNKSs4findEcj[];
+extern char _ZNKSs7compareEPKc[];
+extern char _ZNKSs7compareERKSs[];
+extern char _ZNKSs7compareEjjPKc[];
+extern char _ZNKSt15basic_stringbufIcSt11char_traitsIcESaIcEE3strEv[];
+extern char _ZNKSt9basic_iosIcSt11char_traitsIcEE5widenEc[];
+extern char _ZNSbIwSt11char_traitsIwESaIwEE12_Alloc_hiderC1EPwRKS1_[];
+extern char _ZNSbIwSt11char_traitsIwESaIwEE12_M_leak_hardEv[];
+extern char _ZNSbIwSt11char_traitsIwESaIwEE12_S_constructEjwRKS1_[];
+extern char _ZNSbIwSt11char_traitsIwESaIwEE4_Rep10_M_destroyERKS1_[];
+extern char _ZNSbIwSt11char_traitsIwESaIwEE4_Rep20_S_empty_rep_storageE[];
+extern char _ZNSbIwSt11char_traitsIwESaIwEE5eraseEN9__gnu_cxx17__normal_iteratorIPwS2_EE[];
+extern char _ZNSbIwSt11char_traitsIwESaIwEE6assignEPKwj[];
+extern char _ZNSbIwSt11char_traitsIwESaIwEE6assignERKS2_[];
+extern char _ZNSbIwSt11char_traitsIwESaIwEE6insertEN9__gnu_cxx17__normal_iteratorIPwS2_EEw[];
+extern char _ZNSbIwSt11char_traitsIwESaIwEE7replaceEN9__gnu_cxx17__normal_iteratorIPwS2_EES6_PKwj[];
+extern char _ZNSbIwSt11char_traitsIwESaIwEEC1EPKwRKS1_[];
+extern char _ZNSbIwSt11char_traitsIwESaIwEEC1ERKS2_[];
+extern char _ZNSbIwSt11char_traitsIwESaIwEEC1ERKS2_jj[];
+extern char _ZNSbIwSt11char_traitsIwESaIwEEC1EjwRKS1_[];
+extern char _ZNSbIwSt11char_traitsIwESaIwEEC2Ev[];
+extern char _ZNSbIwSt11char_traitsIwESaIwEED2Ev[];
+extern char _ZNSolsEi[];
+extern char _ZNSolsEl[];
+extern char _ZNSs12_M_leak_hardEv[];
+extern char _ZNSs4_Rep10_M_destroyERKSaIcE[];
+extern char _ZNSs4_Rep20_S_empty_rep_storageE[];
+extern char _ZNSs5eraseEjj[];
+extern char _ZNSs6appendEPKcj[];
+extern char _ZNSs6appendERKSs[];
+extern char _ZNSs6appendEjc[];
+extern char _ZNSs6assignEPKcj[];
+extern char _ZNSs6assignERKSs[];
+extern char _ZNSs6insertEjRKSsjj[];
+extern char _ZNSs6resizeEjc[];
+extern char _ZNSs7reserveEj[];
+extern char _ZNSs9_M_mutateEjjj[];
+extern char _ZNSs9push_backEc[];
+extern char _ZNSsC1EPKcRKSaIcE[];
+extern char _ZNSsC1EPKcjRKSaIcE[];
+extern char _ZNSsC1ERKSs[];
+extern char _ZNSsC1ERKSsjj[];
+extern char _ZNSsC2Ev[];
+extern char _ZNSsD2Ev[];
+extern char _ZNSt15_List_node_base4hookEPS_[];
+extern char _ZNSt15_List_node_base4swapERS_S0_[];
+extern char _ZNSt15_List_node_base6unhookEv[];
+extern char _ZNSt15_List_node_base8transferEPS_S0_[];
+extern char _ZNSt19basic_ostringstreamIcSt11char_traitsIcESaIcEEC1ESt13_Ios_Openmode[];
+extern char _ZNSt19basic_ostringstreamIcSt11char_traitsIcESaIcEED1Ev[];
+extern char _ZNSt8ios_base4InitC1Ev[];
+extern char _ZNSt8ios_base4InitD1Ev[];
+extern char _ZSt17__throw_bad_allocv[];
+extern char _ZSt18_Rb_tree_decrementPSt18_Rb_tree_node_base[];
+extern char _ZSt18_Rb_tree_incrementPKSt18_Rb_tree_node_base[];
+extern char _ZSt18_Rb_tree_incrementPSt18_Rb_tree_node_base[];
+extern char _ZSt19__throw_logic_errorPKc[];
+extern char _ZSt20__throw_length_errorPKc[];
+extern char _ZSt20__throw_out_of_rangePKc[];
+extern char _ZSt28_Rb_tree_rebalance_for_erasePSt18_Rb_tree_node_baseRS_[];
+extern char _ZSt29_Rb_tree_insert_and_rebalancebPSt18_Rb_tree_node_baseS0_RS_[];
+extern char _ZTVN10__cxxabiv117__class_type_infoE[];
+extern char _ZTVN10__cxxabiv120__si_class_type_infoE[];
+extern char _ZTVN10__cxxabiv121__vmi_class_type_infoE[];
+extern char _ZdaPv[];
+extern char _ZdlPv[];
+extern char _Znaj[];
+extern char _Znwj[];
+
+const import_entry cxx_imports[] = {
+    {"__ZN9__gnu_cxx12__atomic_addEPVii", (uintptr_t)_ZN9__gnu_cxx12__atomic_addEPVii, 0},
+    {"__ZN9__gnu_cxx18__exchange_and_addEPVii", (uintptr_t)_ZN9__gnu_cxx18__exchange_and_addEPVii, 0},
+    {"__ZNKSs3endEv", (uintptr_t)_ZNKSs3endEv, 0},
+    {"__ZNKSs4findEPKcmm", (uintptr_t)_ZNKSs4findEPKcjj, 0},
+    {"__ZNKSs4findEcm", (uintptr_t)_ZNKSs4findEcj, 0},
+    {"__ZNKSs7compareEPKc", (uintptr_t)_ZNKSs7compareEPKc, 0},
+    {"__ZNKSs7compareERKSs", (uintptr_t)_ZNKSs7compareERKSs, 0},
+    {"__ZNKSs7compareEmmPKc", (uintptr_t)_ZNKSs7compareEjjPKc, 0},
+    {"__ZNKSt15basic_stringbufIcSt11char_traitsIcESaIcEE3strEv", (uintptr_t)_ZNKSt15basic_stringbufIcSt11char_traitsIcESaIcEE3strEv, 0},
+    {"__ZNKSt9basic_iosIcSt11char_traitsIcEE5widenEc", (uintptr_t)_ZNKSt9basic_iosIcSt11char_traitsIcEE5widenEc, 0},
+    {"__ZNSbIwSt11char_traitsIwESaIwEE12_Alloc_hiderC1EPwRKS1_", (uintptr_t)_ZNSbIwSt11char_traitsIwESaIwEE12_Alloc_hiderC1EPwRKS1_, 0},
+    {"__ZNSbIwSt11char_traitsIwESaIwEE12_M_leak_hardEv", (uintptr_t)_ZNSbIwSt11char_traitsIwESaIwEE12_M_leak_hardEv, 0},
+    {"__ZNSbIwSt11char_traitsIwESaIwEE12_S_constructEmwRKS1_", (uintptr_t)_ZNSbIwSt11char_traitsIwESaIwEE12_S_constructEjwRKS1_, 0},
+    {"__ZNSbIwSt11char_traitsIwESaIwEE4_Rep10_M_destroyERKS1_", (uintptr_t)_ZNSbIwSt11char_traitsIwESaIwEE4_Rep10_M_destroyERKS1_, 0},
+    {"__ZNSbIwSt11char_traitsIwESaIwEE4_Rep20_S_empty_rep_storageE", (uintptr_t)_ZNSbIwSt11char_traitsIwESaIwEE4_Rep20_S_empty_rep_storageE, 1},
+    {"__ZNSbIwSt11char_traitsIwESaIwEE5eraseEN9__gnu_cxx17__normal_iteratorIPwS2_EE", (uintptr_t)_ZNSbIwSt11char_traitsIwESaIwEE5eraseEN9__gnu_cxx17__normal_iteratorIPwS2_EE, 0},
+    {"__ZNSbIwSt11char_traitsIwESaIwEE6assignEPKwm", (uintptr_t)_ZNSbIwSt11char_traitsIwESaIwEE6assignEPKwj, 0},
+    {"__ZNSbIwSt11char_traitsIwESaIwEE6assignERKS2_", (uintptr_t)_ZNSbIwSt11char_traitsIwESaIwEE6assignERKS2_, 0},
+    {"__ZNSbIwSt11char_traitsIwESaIwEE6insertEN9__gnu_cxx17__normal_iteratorIPwS2_EEw", (uintptr_t)_ZNSbIwSt11char_traitsIwESaIwEE6insertEN9__gnu_cxx17__normal_iteratorIPwS2_EEw, 0},
+    {"__ZNSbIwSt11char_traitsIwESaIwEE7replaceEN9__gnu_cxx17__normal_iteratorIPwS2_EES6_PKwm", (uintptr_t)_ZNSbIwSt11char_traitsIwESaIwEE7replaceEN9__gnu_cxx17__normal_iteratorIPwS2_EES6_PKwj, 0},
+    {"__ZNSbIwSt11char_traitsIwESaIwEEC1EPKwRKS1_", (uintptr_t)_ZNSbIwSt11char_traitsIwESaIwEEC1EPKwRKS1_, 0},
+    {"__ZNSbIwSt11char_traitsIwESaIwEEC1ERKS2_", (uintptr_t)_ZNSbIwSt11char_traitsIwESaIwEEC1ERKS2_, 0},
+    {"__ZNSbIwSt11char_traitsIwESaIwEEC1ERKS2_mm", (uintptr_t)_ZNSbIwSt11char_traitsIwESaIwEEC1ERKS2_jj, 0},
+    {"__ZNSbIwSt11char_traitsIwESaIwEEC1EmwRKS1_", (uintptr_t)_ZNSbIwSt11char_traitsIwESaIwEEC1EjwRKS1_, 0},
+    {"__ZNSbIwSt11char_traitsIwESaIwEEC2Ev", (uintptr_t)_ZNSbIwSt11char_traitsIwESaIwEEC2Ev, 0},
+    {"__ZNSbIwSt11char_traitsIwESaIwEED2Ev", (uintptr_t)_ZNSbIwSt11char_traitsIwESaIwEED2Ev, 0},
+    {"__ZNSolsEi", (uintptr_t)_ZNSolsEi, 0},
+    {"__ZNSolsEl", (uintptr_t)_ZNSolsEl, 0},
+    {"__ZNSs12_M_leak_hardEv", (uintptr_t)_ZNSs12_M_leak_hardEv, 0},
+    {"__ZNSs4_Rep10_M_destroyERKSaIcE", (uintptr_t)_ZNSs4_Rep10_M_destroyERKSaIcE, 0},
+    {"__ZNSs4_Rep20_S_empty_rep_storageE", (uintptr_t)_ZNSs4_Rep20_S_empty_rep_storageE, 1},
+    {"__ZNSs5eraseEmm", (uintptr_t)_ZNSs5eraseEjj, 0},
+    {"__ZNSs6appendEPKcm", (uintptr_t)_ZNSs6appendEPKcj, 0},
+    {"__ZNSs6appendERKSs", (uintptr_t)_ZNSs6appendERKSs, 0},
+    {"__ZNSs6appendEmc", (uintptr_t)_ZNSs6appendEjc, 0},
+    {"__ZNSs6assignEPKcm", (uintptr_t)_ZNSs6assignEPKcj, 0},
+    {"__ZNSs6assignERKSs", (uintptr_t)_ZNSs6assignERKSs, 0},
+    {"__ZNSs6insertEmRKSsmm", (uintptr_t)_ZNSs6insertEjRKSsjj, 0},
+    {"__ZNSs6resizeEmc", (uintptr_t)_ZNSs6resizeEjc, 0},
+    {"__ZNSs7reserveEm", (uintptr_t)_ZNSs7reserveEj, 0},
+    {"__ZNSs9_M_mutateEmmm", (uintptr_t)_ZNSs9_M_mutateEjjj, 0},
+    {"__ZNSs9push_backEc", (uintptr_t)_ZNSs9push_backEc, 0},
+    {"__ZNSsC1EPKcRKSaIcE", (uintptr_t)_ZNSsC1EPKcRKSaIcE, 0},
+    {"__ZNSsC1EPKcmRKSaIcE", (uintptr_t)_ZNSsC1EPKcjRKSaIcE, 0},
+    {"__ZNSsC1ERKSs", (uintptr_t)_ZNSsC1ERKSs, 0},
+    {"__ZNSsC1ERKSsmm", (uintptr_t)_ZNSsC1ERKSsjj, 0},
+    {"__ZNSsC2Ev", (uintptr_t)_ZNSsC2Ev, 0},
+    {"__ZNSsD2Ev", (uintptr_t)_ZNSsD2Ev, 0},
+    {"__ZNSt15_List_node_base4hookEPS_", (uintptr_t)_ZNSt15_List_node_base4hookEPS_, 0},
+    {"__ZNSt15_List_node_base4swapERS_S0_", (uintptr_t)_ZNSt15_List_node_base4swapERS_S0_, 0},
+    {"__ZNSt15_List_node_base6unhookEv", (uintptr_t)_ZNSt15_List_node_base6unhookEv, 0},
+    {"__ZNSt15_List_node_base8transferEPS_S0_", (uintptr_t)_ZNSt15_List_node_base8transferEPS_S0_, 0},
+    {"__ZNSt19basic_ostringstreamIcSt11char_traitsIcESaIcEEC1ESt13_Ios_Openmode", (uintptr_t)_ZNSt19basic_ostringstreamIcSt11char_traitsIcESaIcEEC1ESt13_Ios_Openmode, 0},
+    {"__ZNSt19basic_ostringstreamIcSt11char_traitsIcESaIcEED1Ev", (uintptr_t)_ZNSt19basic_ostringstreamIcSt11char_traitsIcESaIcEED1Ev, 0},
+    {"__ZNSt8ios_base4InitC1Ev", (uintptr_t)_ZNSt8ios_base4InitC1Ev, 0},
+    {"__ZNSt8ios_base4InitD1Ev", (uintptr_t)_ZNSt8ios_base4InitD1Ev, 0},
+    {"__ZSt17__throw_bad_allocv", (uintptr_t)_ZSt17__throw_bad_allocv, 0},
+    {"__ZSt18_Rb_tree_decrementPSt18_Rb_tree_node_base", (uintptr_t)_ZSt18_Rb_tree_decrementPSt18_Rb_tree_node_base, 0},
+    {"__ZSt18_Rb_tree_incrementPKSt18_Rb_tree_node_base", (uintptr_t)_ZSt18_Rb_tree_incrementPKSt18_Rb_tree_node_base, 0},
+    {"__ZSt18_Rb_tree_incrementPSt18_Rb_tree_node_base", (uintptr_t)_ZSt18_Rb_tree_incrementPSt18_Rb_tree_node_base, 0},
+    {"__ZSt19__throw_logic_errorPKc", (uintptr_t)_ZSt19__throw_logic_errorPKc, 0},
+    {"__ZSt20__throw_length_errorPKc", (uintptr_t)_ZSt20__throw_length_errorPKc, 0},
+    {"__ZSt20__throw_out_of_rangePKc", (uintptr_t)_ZSt20__throw_out_of_rangePKc, 0},
+    {"__ZSt28_Rb_tree_rebalance_for_erasePSt18_Rb_tree_node_baseRS_", (uintptr_t)_ZSt28_Rb_tree_rebalance_for_erasePSt18_Rb_tree_node_baseRS_, 0},
+    {"__ZSt29_Rb_tree_insert_and_rebalancebPSt18_Rb_tree_node_baseS0_RS_", (uintptr_t)_ZSt29_Rb_tree_insert_and_rebalancebPSt18_Rb_tree_node_baseS0_RS_, 0},
+    {"__ZTVN10__cxxabiv117__class_type_infoE", (uintptr_t)_ZTVN10__cxxabiv117__class_type_infoE, 1},
+    {"__ZTVN10__cxxabiv120__si_class_type_infoE", (uintptr_t)_ZTVN10__cxxabiv120__si_class_type_infoE, 1},
+    {"__ZTVN10__cxxabiv121__vmi_class_type_infoE", (uintptr_t)_ZTVN10__cxxabiv121__vmi_class_type_infoE, 1},
+    {"__ZdaPv", (uintptr_t)_ZdaPv, 0},
+    {"__ZdlPv", (uintptr_t)_ZdlPv, 0},
+    {"__Znam", (uintptr_t)_Znaj, 0},
+    {"__Znwm", (uintptr_t)_Znwj, 0},
+};
+const int cxx_imports_count = sizeof(cxx_imports) / sizeof(cxx_imports[0]);
