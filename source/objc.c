@@ -26,6 +26,7 @@
 #include <sys/stat.h>
 #include <math.h>
 #include <psp2/kernel/threadmgr.h>
+#include <psp2/kernel/processmgr.h>
 
 #include "darwin.h"
 #include "darwin_printf.h"
@@ -408,7 +409,51 @@ static void *cf_CFURLCopyFileSystemPath(void *anURL, int pathStyle) {
     return ns_new(p);
 }
 static void cf_CFRelease(void *cf) {}
+// NSTimer: -[AppController applicationDidFinishLaunching:] schedules a 1/60 s repeating timer -> -draw,
+// which runs updateTimerPages() (logo -> platform logo -> menu_TouchScreen chain), loading screens and
+// CMainGame::LoadMenuRes. It used to be dropped, so the gameswf menu stack stayed empty (log 024).
+// Fired from the game thread's per-frame CFRunLoopRunInMode (inside its mutex), so -draw's GL calls stay
+// on the thread that owns vitaGL, serialized with GameLoop.
+// ponytail: only timers targeting the app delegate are kept; other targets (IGP/GLLive UI) are ignored.
+uintptr_t objc_get_imp(void *cls, const char *sel_name);
+typedef struct {
+    void *target;
+    const char *sel;
+    uint64_t period_us, next_us;
+    int repeats;
+} ns_timer;
+static ns_timer s_timers[4];
+static int s_timer_count;
+
+static void timers_fire(void) {
+    static int busy;
+    if (busy)
+        return;
+    busy = 1;
+    uint64_t now = sceKernelGetProcessTimeWide();
+    for (int i = 0; i < s_timer_count; i++) {
+        ns_timer *t = &s_timers[i];
+        // Half-period slack: the game loop also runs at ~60 Hz, so a strict deadline skips every other frame.
+        if (!t->target || now + t->period_us / 2 < t->next_us)
+            continue;
+        t->next_us = now + t->period_us;
+        uintptr_t imp = objc_get_imp(*(void **)t->target, t->sel);
+        static int fired;
+        if (fired++ % 300 == 0) { // ponytail: diag, remove once the menu shows
+            const uint8_t *f = (const uint8_t *)(MACHO_SLIDE + 0x6b92bd);
+            l_info("[OBJC] timer %s fire #%d imp=%p showLogo=%d UBI=%d plat=%d platOver=%d", t->sel, fired - 1,
+                   (void *)imp, f[7], f[2], f[1], f[0]);
+        }
+        if (imp)
+            call_guest((void *)imp, (uint32_t)t->target, (uint32_t)t->sel, 0, 0);
+        if (!t->repeats)
+            t->target = NULL;
+    }
+    busy = 0;
+}
+
 static int cf_CFRunLoopRunInMode(void *mode, double seconds, int returnAfterSourceHandled) {
+    timers_fire();
     sceKernelDelayThread(1000);
     return 0;
 }
@@ -854,6 +899,18 @@ static uint32_t objc_msgSend_system_impl(void *self, const char *sel, va_list ap
     } else if (sel_is(sel, "objectForKey:")) {
         r = 0;
     } else if (sel_is(sel, "scheduledTimerWithTimeInterval:target:selector:userInfo:repeats:")) {
+        // (NSTimeInterval)r2:r3, then target, selector, userInfo, repeats.
+        union { uint32_t w[2]; double d; } iv = {{a, va_arg(ap_copy, uint32_t)}};
+        void *target = va_arg(ap_copy, void *);
+        const char *tsel = va_arg(ap_copy, const char *);
+        (void)va_arg(ap_copy, uint32_t);
+        int repeats = va_arg(ap_copy, uint32_t) & 0xff;
+        l_info("[OBJC] NSTimer %.4fs target=%p sel=%s repeats=%d%s", iv.d, target, tsel ? tsel : "?", repeats,
+               target == s_app_delegate && s_timer_count < 4 ? "" : " (ignored)");
+        if (target == s_app_delegate && s_timer_count < 4) {
+            uint64_t p = iv.d > 0 && iv.d < 10 ? (uint64_t)(iv.d * 1e6) : 16667;
+            s_timers[s_timer_count++] = (ns_timer){target, tsel, p, sceKernelGetProcessTimeWide() + p, repeats};
+        }
         r = (uintptr_t)ret_obj();
     } else if (sel_is(sel, "objectAtIndex:") || sel_is(sel, "objectAtIndexedSubscript:")) {
         uint32_t idx = a;
@@ -916,6 +973,60 @@ static uint32_t objc_msgSend_system_impl(void *self, const char *sel, va_list ap
         r = (uint32_t)ime_utf8;
     } else if (sel_is(sel, "textInputGetLength")) {
         r = utf16_len(ime_utf8);
+    // NSString selectors found by auditing __objc_selrefs against this file (tools/decomp_map.py).
+    } else if (sel_is(sel, "stringWithContentsOfFile:") || sel_is(sel, "stringWithContentsOfFile:encoding:error:") ||
+               sel_is(sel, "initWithContentsOfFile:")) {
+        char real_p[512];
+        FILE *f = fopen(darwin_path(ns_cstr((void *)a), real_p, sizeof(real_p)), "rb");
+        if (f) { // nil on a missing file, like Foundation
+            fseek(f, 0, SEEK_END);
+            long n = ftell(f);
+            fseek(f, 0, SEEK_SET);
+            char *buf = calloc(1, n + 1);
+            fread(buf, 1, n, f);
+            fclose(f);
+            r = (uint32_t)ns_new(buf);
+            free(buf);
+        }
+    } else if (sel_is(sel, "hasPrefix:") || sel_is(sel, "hasSuffix:")) {
+        const char *s = ns_cstr(self), *x = ns_cstr((void *)a);
+        size_t sl = strlen(s), xl = strlen(x);
+        r = xl <= sl && !memcmp(sel[3] == 'P' ? s : s + sl - xl, x, xl);
+    } else if (sel_is(sel, "intValue")) {
+        r = (uint32_t)atoi(ns_cstr(self)); // isFW3() = [[systemVersion substringToIndex:1] intValue] > 2
+    } else if (sel_is(sel, "substringToIndex:")) {
+        const char *s = ns_cstr(self);
+        r = (uint32_t)ns_new(s);
+        if (a < ((ns_string *)r)->len) ((ns_string *)r)->str[a] = 0, ((ns_string *)r)->len = a;
+    } else if (sel_is(sel, "substringWithRange:")) { // NSRange {loc,len} arrives in r2:r3
+        const char *s = ns_cstr(self);
+        uint32_t len = va_arg(ap_copy, uint32_t), sl = strlen(s);
+        uint32_t loc = a < sl ? a : sl;
+        char *tmp = strndup(s + loc, len);
+        r = (uint32_t)ns_new(tmp);
+        free(tmp);
+    } else if (sel_is(sel, "stringByAppendingFormat:")) {
+        const char *base = ns_cstr(self);
+        ns_string *tail = ns_format(ns_cstr((void *)a), ap_copy);
+        char *tmp = malloc(strlen(base) + tail->len + 1);
+        strcpy(tmp, base);
+        strcat(tmp, tail->str);
+        r = (uint32_t)ns_new(tmp);
+        free(tmp);
+    } else if (sel_is(sel, "stringByAppendingPathExtension:")) {
+        char p[512];
+        snprintf(p, sizeof(p), "%s.%s", ns_cstr(self), ns_cstr((void *)a));
+        r = (uint32_t)ns_new(p);
+    } else if (sel_is(sel, "isAbsolutePath")) {
+        r = ns_cstr(self)[0] == '/';
+    } else if (sel_is(sel, "createDirectoryAtPath:attributes:")) {
+        char real_p[512];
+        const char *p = darwin_path(ns_cstr((void *)a), real_p, sizeof(real_p));
+        struct stat st;
+        r = mkdir(p, 0777) == 0 || stat(p, &st) == 0;
+    } else if (sel_is(sel, "removeItemAtPath:error:")) {
+        char real_p[512];
+        r = remove(darwin_path(ns_cstr((void *)a), real_p, sizeof(real_p))) == 0;
     } else {
         log_unknown(self, sel);
     }

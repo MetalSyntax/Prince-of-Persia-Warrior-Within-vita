@@ -12,7 +12,7 @@ import subprocess
 import sys
 
 out = sys.argv[1] if len(sys.argv) > 1 else 'source/cxx_imports.c'
-sdk = os.environ.get('VITASDK', '/home/metalsyntax/vitasdk')
+sdk = os.environ.get('VITASDK', os.path.expanduser('~/vitasdk'))
 
 with open('decompiled/macho/imports.txt') as f:
     undef = [line.strip() for line in f if line.strip()]

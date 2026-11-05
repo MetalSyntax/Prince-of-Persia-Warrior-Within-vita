@@ -35,17 +35,29 @@ if (VITA_GCC_V MATCHES "with-float=softfp")
   set(VITAGL_MAKE_FLAGS_STR "${VITAGL_MAKE_FLAGS_STR} SOFTFP_LIBS=1")
 endif()
 separate_arguments(VITAGL_MAKE_FLAGS UNIX_COMMAND "${VITAGL_MAKE_FLAGS_STR}")
+# Out-of-tree build: objects built in vendor/ by another toolchain (old WSL builds) looked
+# up to date and got linked. The flags hash in the dir name forces a clean build when they change.
+string(MD5 VITAGL_FLAGS_HASH "${VITAGL_MAKE_FLAGS_STR}")
+string(SUBSTRING ${VITAGL_FLAGS_HASH} 0 8 VITAGL_FLAGS_HASH)
+set(VITAGL_BUILD_DIR ${CMAKE_BINARY_DIR}/vitaGL-${VITAGL_FLAGS_HASH})
+cmake_host_system_information(RESULT VITAGL_JOBS QUERY NUMBER_OF_LOGICAL_CORES)
 include(ExternalProject)
 ExternalProject_Add(
   vitaGL_vendored
   SOURCE_DIR ${VITAGL_VENDOR_DIR}
-  BUILD_IN_SOURCE 1
+  BINARY_DIR ${VITAGL_BUILD_DIR}
   CONFIGURE_COMMAND ""
-  BUILD_COMMAND make ${VITAGL_MAKE_FLAGS}
+  # rsync keeps mtimes (incremental make); skip stale artifacts and macOS ._* files on exFAT,
+  # which vitaGL's $(wildcard source/*.c) would otherwise try to compile.
+  BUILD_COMMAND rsync -a --delete --exclude=*.o --exclude=*.a --exclude=._* --exclude=.DS_Store
+                ${VITAGL_VENDOR_DIR}/ ${VITAGL_BUILD_DIR}/
+        COMMAND make -j${VITAGL_JOBS} ${VITAGL_MAKE_FLAGS}
+  BUILD_ALWAYS 1
+  BUILD_BYPRODUCTS ${VITAGL_BUILD_DIR}/libvitaGL.a
   INSTALL_COMMAND ""
 )
 add_library(vitaGL_vendored_lib STATIC IMPORTED)
-set_target_properties(vitaGL_vendored_lib PROPERTIES IMPORTED_LOCATION ${VITAGL_VENDOR_DIR}/libvitaGL.a)
+set_target_properties(vitaGL_vendored_lib PROPERTIES IMPORTED_LOCATION ${VITAGL_BUILD_DIR}/libvitaGL.a)
 add_dependencies(vitaGL_vendored_lib vitaGL_vendored)
 
 include_directories(

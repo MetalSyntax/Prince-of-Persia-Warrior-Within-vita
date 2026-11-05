@@ -13,4 +13,3 @@ void patch_init(void);
 /**
  * @brief Per-frame callback invoked from the main loop for custom game logic.
  */
-void patch_frame(void);

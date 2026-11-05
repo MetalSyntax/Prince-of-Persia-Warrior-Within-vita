@@ -1,0 +1,242 @@
+<title>Warrior Within Decomp Map</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@75..100,400..800&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: one column; ladder summary, then the function grid (one cell = one function, __text order), then subsystem / import / selector ledgers. */
+:root {
+  --bg: #eef1f4; --panel: #ffffff; --fg: #15202b; --muted: #5a6776; --line: #d6dde5;
+  --native: #2457d6; --matched: #17946a; --named: #a3afbd; --unnamed: #c98210; --failed: #c8382d;
+  --dim: rgba(238,241,244,.82);
+  --display: "Archivo", "Helvetica Neue", Arial, sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #0e1318; --panel: #151c23; --fg: #e2e8ee; --muted: #8a97a6; --line: #25303b;
+  --native: #6f95ff; --matched: #3cc48d; --named: #3a4653; --unnamed: #e3a23b; --failed: #f0645a;
+  --dim: rgba(14,19,24,.8); color-scheme: dark } }
+:root[data-theme="dark"] {
+  --bg: #0e1318; --panel: #151c23; --fg: #e2e8ee; --muted: #8a97a6; --line: #25303b;
+  --native: #6f95ff; --matched: #3cc48d; --named: #3a4653; --unnamed: #e3a23b; --failed: #f0645a;
+  --dim: rgba(14,19,24,.8); color-scheme: dark }
+* { box-sizing: border-box }
+body { background: var(--bg); color: var(--fg); font: 14px/1.5 var(--display); font-stretch: 100%;
+  padding-block: 28px 64px; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)) }
+main { max-width: 1180px; margin: 0 auto; display: grid; gap: 28px }
+h1 { font-size: clamp(26px, 4vw, 38px); font-stretch: 75%; font-weight: 800; letter-spacing: -.01em; margin: 0; text-wrap: balance; line-height: 1.05 }
+h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .09em; font-weight: 700; margin: 0; color: var(--muted) }
+p { margin: 0; max-width: 68ch }
+.mono, code { font-family: var(--mono); font-size: 12.5px }
+header { display: grid; gap: 10px }
+header .meta { color: var(--muted); font-family: var(--mono); font-size: 12px }
+.ladder { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); border: 1px solid var(--line); background: var(--panel); border-radius: 6px }
+.step { padding: 16px 18px; display: grid; gap: 4px; border-left: 1px solid var(--line); min-width: 0 }
+.step:first-child { border-left: 0 }
+.step .k { display: flex; gap: 8px; align-items: center; font-weight: 600 }
+.sw { width: 11px; height: 11px; border-radius: 2px; flex: none }
+.step .n { font-size: 30px; font-weight: 800; font-stretch: 80%; font-variant-numeric: tabular-nums; line-height: 1.1 }
+.step .s { color: var(--muted); font-size: 12.5px; font-variant-numeric: tabular-nums }
+.bar { height: 6px; background: var(--line); border-radius: 3px; overflow: hidden }
+.bar i { display: block; height: 100% }
+section { display: grid; gap: 12px; min-width: 0 }
+.tools { display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: center }
+.seg { display: inline-flex; border: 1px solid var(--line); border-radius: 5px; overflow: hidden }
+.seg button { font: 600 12.5px var(--display); background: var(--panel); color: var(--muted); border: 0; padding: 6px 11px; cursor: pointer }
+.seg button[aria-pressed="true"] { background: var(--fg); color: var(--bg) }
+button:focus-visible, input:focus-visible { outline: 2px solid var(--native); outline-offset: 2px }
+input[type=search] { font: 13px var(--mono); padding: 6px 10px; border: 1px solid var(--line); border-radius: 5px; background: var(--panel); color: var(--fg); width: min(320px, 100%) }
+.legend { display: flex; flex-wrap: wrap; gap: 6px 14px; color: var(--muted); font-size: 12.5px }
+.legend span { display: inline-flex; align-items: center; gap: 6px }
+.gridwrap { position: relative; background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 12px }
+canvas { display: block; width: 100%; cursor: crosshair }
+#tip { position: fixed; pointer-events: none; z-index: 5; background: var(--fg); color: var(--bg); padding: 8px 10px; border-radius: 5px; font-size: 12.5px; max-width: min(420px, 90vw); display: grid; gap: 2px }
+#tip b { font-family: var(--mono); font-weight: 500; word-break: break-all }
+#detail { font-size: 13px; color: var(--muted); min-height: 1.5em }
+#detail b { color: var(--fg); font-family: var(--mono); font-weight: 500; word-break: break-all }
+.cols { display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr); gap: 28px; align-items: start }
+.tbl { overflow-x: auto; background: var(--panel); border: 1px solid var(--line); border-radius: 6px; max-height: 560px; overflow-y: auto }
+table { border-collapse: collapse; width: 100%; font-size: 13px }
+th, td { text-align: left; padding: 6px 10px; border-bottom: 1px solid var(--line); white-space: nowrap }
+th { position: sticky; top: 0; background: var(--panel); font-size: 11.5px; text-transform: uppercase; letter-spacing: .07em; color: var(--muted); font-weight: 600 }
+td.num { text-align: right; font-variant-numeric: tabular-nums; font-family: var(--mono); font-size: 12px }
+tbody tr { cursor: pointer }
+tbody tr:hover, tbody tr.on { background: color-mix(in srgb, var(--native) 10%, transparent) }
+td .bar { width: 90px; display: inline-block; vertical-align: middle }
+.chips { display: flex; flex-wrap: wrap; gap: 5px }
+.chip { font: 12px var(--mono); padding: 2px 7px; border-radius: 4px; border: 1px solid var(--line); background: var(--panel) }
+.chip.miss { border-color: var(--unnamed); color: var(--unnamed) }
+.chip.ok { color: var(--muted) }
+.note { color: var(--muted); font-size: 13px }
+@media (max-width: 760px) { .ladder { grid-template-columns: repeat(2, minmax(0, 1fr)) } .step:nth-child(3) { border-left: 0 } .step:nth-child(n+3) { border-top: 1px solid var(--line) } .cols { grid-template-columns: minmax(0, 1fr) } }
+@media (prefers-reduced-motion: reduce) { * { transition: none !important } }
+</style>
+
+<main>
+  <header>
+    <h1>Prince of Persia: Warrior Within · mapa de decompilación</h1>
+    <p>Cada celda es una función de <code>__TEXT,__text</code> del ejecutable iOS <code>POP</code> (ARMv6, motor Jade). Hoy la Vita ejecuta el código ARM original a través del loader Mach-O; las funciones <em>nativas</em> ya están reescritas en C y compiladas para la Vita.</p>
+    <div class="meta" id="meta"></div>
+  </header>
+
+  <div class="ladder" id="ladder"></div>
+
+  <section>
+    <div class="tools">
+      <h2>Funciones</h2>
+      <div class="seg" role="group" aria-label="Color">
+        <button id="m-status" aria-pressed="true">Estado</button><button id="m-sub" aria-pressed="false">Subsistema</button>
+      </div>
+      <div class="seg" role="group" aria-label="Orden">
+        <button id="o-addr" aria-pressed="true">Dirección</button><button id="o-sub" aria-pressed="false">Subsistema</button>
+      </div>
+      <input type="search" id="q" placeholder="Buscar función o 0xdirección" aria-label="Buscar función">
+    </div>
+    <div class="legend" id="legend"></div>
+    <div class="gridwrap"><canvas id="cv" aria-label="Mapa de funciones"></canvas></div>
+    <div id="detail">Pasa el cursor por una celda; clic para fijarla.</div>
+  </section>
+
+  <div class="cols">
+    <section>
+      <h2>Subsistemas</h2>
+      <div class="tbl"><table>
+        <thead><tr><th>Subsistema</th><th class="num">Funcs</th><th class="num">KB</th><th>Nativo</th><th class="num">%</th></tr></thead>
+        <tbody id="subs"></tbody>
+      </table></div>
+      <p class="note">Clic en una fila para resaltarla en el mapa. Los prefijos <code>Jade XXX</code> salen de los nombres de símbolo del motor.</p>
+    </section>
+    <section>
+      <h2>Imports del loader</h2>
+      <div id="imps" class="note"></div>
+      <h2>Selectores ObjC a clases del sistema</h2>
+      <div id="sels" class="note"></div>
+    </section>
+  </div>
+</main>
+<div id="tip" hidden></div>
+
+<script>
+const D = /*__DATA__*/null;
+const ST = { unnamed: 'Pseudo-C sin nombre', named: 'Pseudo-C con símbolo', native: 'Nativo (C para Vita)', matched: 'Fuente reconstruida', failed: 'Falló la decompilación' };
+const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+const fmt = n => n.toLocaleString('es');
+const hex = a => '0x' + a.toString(16).padStart(8, '0');
+const F = D.funcs.map(([addr, size, name, sub, st, note], i) => ({ i, addr, size, name, sub, st, note }));
+const total = F.reduce((s, f) => s + f.size, 0);
+
+// subsystems by size; top 10 get categorical hues, the rest share a neutral
+const subs = {};
+for (const f of F) { const s = subs[f.sub] ??= { name: f.sub, n: 0, b: 0, nat: 0, natb: 0 }; s.n++; s.b += f.size; if (f.st === 'native' || f.st === 'matched') { s.nat++; s.natb += f.size } }
+const subList = Object.values(subs).sort((a, b) => b.b - a.b);
+const HUES = [212, 28, 160, 330, 48, 265, 0, 190, 95, 300];
+subList.forEach((s, k) => s.hue = k < HUES.length ? HUES[k] : null);
+
+document.getElementById('meta').textContent = `${fmt(F.length)} funciones · ${fmt(Math.round(total / 1024))} KB de código · ${hex(D.text[0])}–${hex(D.text[1])} · generado de ${D.generated || 'working tree'}`;
+
+// ladder
+const cnt = st => F.filter(f => f.st === st);
+const named = F.filter(f => f.st !== 'unnamed' && f.st !== 'failed');
+const nat = F.filter(f => f.st === 'native' || f.st === 'matched');
+const steps = [
+  ['Pseudo-C (Ghidra)', '--named', F.length - cnt('failed').length, total - cnt('failed').reduce((s, f) => s + f.size, 0)],
+  ['Con nombre original', '--named', named.length, named.reduce((s, f) => s + f.size, 0)],
+  ['Recompilado nativo', '--native', nat.length, nat.reduce((s, f) => s + f.size, 0)],
+  ['Fuente reconstruida', '--matched', cnt('matched').length, cnt('matched').reduce((s, f) => s + f.size, 0)],
+];
+document.getElementById('ladder').innerHTML = steps.map(([k, c, n, b]) => {
+  const pct = 100 * b / total;
+  return `<div class="step"><div class="k"><span class="sw" style="background:var(${c})"></span>${k}</div>
+  <div class="n">${fmt(n)}</div><div class="s">${pct < 0.1 && pct > 0 ? pct.toFixed(3) : pct.toFixed(1)} % de los bytes · ${fmt(Math.round(b / 1024))} KB</div>
+  <div class="bar"><i style="width:${Math.max(pct, b ? .4 : 0)}%;background:var(${c})"></i></div></div>`;
+}).join('');
+
+// grid
+const cv = document.getElementById('cv'), ctx = cv.getContext('2d');
+let mode = 'status', order = 'addr', query = '', focusSub = null, pinned = null, layout = [], cell = 7, cols = 1;
+function subColor(s, dark) { return s.hue == null ? (dark ? '#2c3640' : '#c3ccd6') : `hsl(${s.hue} ${dark ? 55 : 60}% ${dark ? 58 : 50}%)` }
+function matches(f) {
+  if (focusSub && f.sub !== focusSub) return false;
+  if (!query) return true;
+  if (/^0x[0-9a-f]+$/.test(query)) { const a = parseInt(query, 16); return a >= f.addr && a < f.addr + f.size }
+  return f.name.toLowerCase().includes(query);
+}
+function draw() {
+  const w = cv.parentElement.clientWidth - 24;
+  cell = w < 520 ? 5 : 7;
+  cols = Math.floor(w / cell);
+  layout = order === 'addr' ? F : [...F].sort((a, b) => subs[b.sub].b - subs[a.sub].b || a.addr - b.addr);
+  const rows = Math.ceil(layout.length / cols), dpr = devicePixelRatio || 1;
+  cv.width = cols * cell * dpr; cv.height = rows * cell * dpr;
+  cv.style.width = cols * cell + 'px'; cv.style.height = rows * cell + 'px';
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  const dark = css('color-scheme') === 'dark' || matchMedia('(prefers-color-scheme: dark)').matches && document.documentElement.dataset.theme !== 'light';
+  const sc = { unnamed: css('--unnamed'), named: css('--named'), native: css('--native'), matched: css('--matched'), failed: css('--failed') };
+  const filtering = query || focusSub, dim = css('--dim');
+  layout.forEach((f, k) => {
+    const x = (k % cols) * cell, y = Math.floor(k / cols) * cell;
+    ctx.fillStyle = mode === 'status' ? sc[f.st] : (f.st === 'native' || f.st === 'matched') ? sc[f.st] : subColor(subs[f.sub], dark);
+    ctx.fillRect(x, y, cell - 1, cell - 1);
+    if (filtering && !matches(f)) { ctx.fillStyle = dim; ctx.fillRect(x, y, cell - 1, cell - 1) }
+  });
+  if (pinned) { const k = layout.indexOf(pinned); if (k >= 0) { ctx.strokeStyle = css('--fg'); ctx.lineWidth = 1.5; ctx.strokeRect((k % cols) * cell - 1, Math.floor(k / cols) * cell - 1, cell + 1, cell + 1) } }
+  legend();
+}
+function legend() {
+  const L = document.getElementById('legend');
+  if (mode === 'status') L.innerHTML = Object.entries(ST).filter(([k]) => F.some(f => f.st === k) || k === 'matched')
+    .map(([k, v]) => `<span><i class="sw" style="background:var(--${k})"></i>${v} · ${fmt(F.filter(f => f.st === k).length)}</span>`).join('');
+  else { const dark = css('color-scheme') === 'dark'; L.innerHTML = subList.slice(0, 10).map(s => `<span><i class="sw" style="background:${subColor(s, dark)}"></i>${s.name}</span>`).join('') + `<span><i class="sw" style="background:${subColor({ hue: null }, dark)}"></i>resto</span><span><i class="sw" style="background:var(--native)"></i>nativo</span>` }
+}
+function at(e) {
+  const r = cv.getBoundingClientRect(), c = Math.floor((e.clientX - r.left) / cell), row = Math.floor((e.clientY - r.top) / cell);
+  return c >= 0 && c < cols ? layout[row * cols + c] : null;
+}
+const describe = f => `<b>${esc(f.name)}</b><span>${hex(f.addr)} · ${fmt(f.size)} bytes · ${esc(f.sub)}</span><span>${ST[f.st]}${f.note ? ' · ' + esc(f.note) : ''}</span>`;
+const esc = s => s.replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+const tip = document.getElementById('tip'), detail = document.getElementById('detail');
+cv.addEventListener('mousemove', e => {
+  const f = at(e);
+  if (!f) { tip.hidden = true; return }
+  tip.innerHTML = describe(f); tip.hidden = false;
+  const x = Math.min(e.clientX + 14, innerWidth - tip.offsetWidth - 8);
+  tip.style.left = x + 'px'; tip.style.top = (e.clientY + 16) + 'px';
+});
+cv.addEventListener('mouseleave', () => tip.hidden = true);
+cv.addEventListener('click', e => {
+  const f = at(e); if (!f) return;
+  pinned = f; detail.innerHTML = describe(f).replace(/<\/?span>/g, ' · ').replace(/^(.*?) · /, '$1 '); draw();
+});
+const press = (on, off) => { on.setAttribute('aria-pressed', 'true'); off.setAttribute('aria-pressed', 'false') };
+const $ = id => document.getElementById(id);
+$('m-status').onclick = () => { mode = 'status'; press($('m-status'), $('m-sub')); draw() };
+$('m-sub').onclick = () => { mode = 'sub'; press($('m-sub'), $('m-status')); draw() };
+$('o-addr').onclick = () => { order = 'addr'; press($('o-addr'), $('o-sub')); draw() };
+$('o-sub').onclick = () => { order = 'sub'; press($('o-sub'), $('o-addr')); draw() };
+$('q').addEventListener('input', e => { query = e.target.value.trim().toLowerCase(); draw() });
+
+// subsystem table
+$('subs').innerHTML = subList.map(s => `<tr data-s="${esc(s.name)}"><td>${esc(s.name)}</td><td class="num">${fmt(s.n)}</td><td class="num">${fmt(Math.round(s.b / 1024))}</td>
+  <td><span class="bar"><i style="width:${Math.max(100 * s.natb / s.b, s.natb ? 2 : 0)}%;background:var(--native)"></i></span></td><td class="num">${(100 * s.natb / s.b).toFixed(1)}</td></tr>`).join('');
+$('subs').addEventListener('click', e => {
+  const tr = e.target.closest('tr'); if (!tr) return;
+  focusSub = focusSub === tr.dataset.s ? null : tr.dataset.s;
+  document.querySelectorAll('#subs tr').forEach(r => r.classList.toggle('on', r.dataset.s === focusSub));
+  draw(); cv.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+});
+
+// imports and selectors
+const ic = st => D.imports.filter(r => r[1] === st);
+$('imps').innerHTML = `<p>${fmt(D.imports.length)} símbolos importados: <b>${ic('native').length}</b> implementados, <b>${ic('stub').length}</b> stubs, <b>${ic('dynamic').length}</b> clases ObjC servidas por el despachador, <b>${ic('missing').length}</b> sin resolver.</p>
+  <div class="bar" style="margin:8px 0"><i style="width:${100 * ic('native').length / D.imports.length}%;background:var(--native)"></i></div>
+  <p style="margin-bottom:6px">Stubs (devuelven un valor fijo; candidatos a revisar):</p>
+  <div class="chips">${ic('stub').map(r => `<span class="chip" title="${esc(r[2])}">${esc(r[0])}</span>`).join('')}${ic('missing').map(r => `<span class="chip miss">${esc(r[0])}</span>`).join('')}</div>`;
+const sh = D.selectors.filter(r => r[1]), sm = D.selectors.filter(r => !r[1]);
+$('sels').innerHTML = `<p>${fmt(D.selectors.length)} selectores enviados a UIKit/Foundation: <b>${sh.length}</b> implementados en <code>objc.c</code>, <b>${sm.length}</b> devuelven nil (la mayoría son UI de IGP/GLLive).</p>
+  <div class="bar" style="margin:8px 0"><i style="width:${100 * sh.length / D.selectors.length}%;background:var(--native)"></i></div>
+  <div class="chips">${sm.map(r => `<span class="chip miss">${esc(r[0])}</span>`).join('')}</div>`;
+
+let lastW = 0;
+new ResizeObserver(() => { const w = cv.parentElement.clientWidth; if (w !== lastW) { lastW = w; draw() } }).observe(cv.parentElement);
+matchMedia('(prefers-color-scheme: dark)').addEventListener('change', draw);
+new MutationObserver(draw).observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
+</script>

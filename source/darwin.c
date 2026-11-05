@@ -190,7 +190,7 @@ static FILE *d_fopen(const char *path, const char *mode) {
     }
     if (!f) {
         // Read misses are the game probing for saves/profiles that don't exist yet: not an error.
-        if (mode && mode[0] == 'r' && !strchr(mode, '+'))
+        if (mode && mode[0] == 'r' && !strchr(mode, '+') && (strstr(p, "/saves/") || strcasestr(p, "save") || strcasestr(p, "profile")))
             l_debug("fopen(%s [orig %s], %s) -> NULL (not found)", p, path, mode);
         else
             l_warn("fopen(%s [orig %s], %s) -> NULL", p, path, mode ? mode : "");
@@ -1068,7 +1068,7 @@ const import_entry darwin_imports[] = {
     F(NSLog, d_NSLog),
     F(tolower, d_tolower), F(toupper, d_toupper),
     F(__tolower, d_tolower), F(__toupper, d_toupper),
-    V(__DefaultRuneLocale, &d_DefaultRuneLocale),
+    V(_DefaultRuneLocale, &d_DefaultRuneLocale), // game imports __DefaultRuneLocale (C: _DefaultRuneLocale)
 
     // wchar
     D(wcscmp), D(wcscpy), D(wcslen), D(wcsncpy), D(wcstombs), D(mbstowcs),
@@ -1121,7 +1121,7 @@ const import_entry darwin_imports[] = {
     F(__cxa_rethrow, d_cxa_rethrow),
     F(__cxa_call_unexpected, d_cxa_call_unexpected),
     F(__dynamic_cast, d_dynamic_cast),
-    F(__gxx_personality_sj0, d_sjlj_noop),
+    F(__gxx_personality_sj0, d_sjlj_noop), F(__objc_personality_v0, d_sjlj_noop),
     F(_Unwind_SjLj_Register, d_sjlj_noop), F(_Unwind_SjLj_Unregister, d_sjlj_noop),
     F(_Unwind_SjLj_Resume, d_sjlj_resume), V(_NSConcreteStackBlock, d_NSConcreteStackBlock),
     F(_Block_object_assign, d_Block_object_assign), F(_Block_object_dispose, d_Block_object_dispose),

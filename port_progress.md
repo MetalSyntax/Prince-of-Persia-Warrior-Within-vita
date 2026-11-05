@@ -17,7 +17,7 @@ Through extensive disassembly and symbol inspection of the decrypted 11.2 MB exe
 
 ### Key Architectural Findings:
 1. **Core Engine:**
-   - Ubiquitous Jade Engine subsystems: Animation (`AMIX_`, `ANI_`), Game Object System (`OBJ_`), Events & Cutscenes (`EVE_`), World & Collision (`COL_`), Sound & Music (`SND_`), and Input Manager (`INO_`).
+   - Ubiquitous Jade Engine subsystems: Animation (`ANI_`), Game Object System (`OBJ_`), Events & Cutscenes (`EVE_`), World & Collision (`COL_`), Sound & Music (`SND_`), and Input Manager (`INO_`).
    - Pure C++ codebase statically compiled into the Mach-O binary.
 2. **Dual-Threaded Rendering Loop:**
    - The application delegate `AppController` initializes the game state in `-[AppController applicationDidFinishLaunching:]`.
@@ -366,6 +366,38 @@ Through extensive disassembly and symbol inspection of the decrypted 11.2 MB exe
   - Fix: `CMakeLists.txt` detecta el toolchain (`gcc -v` → `with-float=softfp`) y define `VITASDK_SOFTFP_LIBS` + pasa `SOFTFP_LIBS=1` a vitaGL; `HARDFP`/`VGL_HARDFP` quedan vacíos solo en ese caso. `SOFTFP_ABI=1` se mantiene (el wrapper `sceGxmSetViewport_sfp` es por el ABI del SO, que siempre es hard).
   - Probable que la imagen negra del vídeo venga de lo mismo (las matrices de vitaGL usan math_neon con `VGL_HARDFP`): verificar en la próxima corrida.
 
+- **Iteration 017 (estática, sin corrida de consola; auditoría con `tools/decomp_map.py`):**
+  - Bug: `darwin.c` exportaba `V(__DefaultRuneLocale)` = `___DefaultRuneLocale`, pero el juego importa `__DefaultRuneLocale` (C `_DefaultRuneLocale`). El lookup es exacto → caía en un thunk "unimpl" (código) y las macros ctype inline de Darwin (`__runetype[c] & mask`) leían instrucciones como tabla. Corregido. También se enlaza `___objc_personality_v0` (último import sin resolver). Ahora 0 imports sin resolver.
+  - `objc.c`: auditados los 220 selectores que el juego manda a clases del sistema (`__objc_selrefs` − métodos de clases guest). Agregados `stringWithContentsOfFile:[encoding:error:]` / `initWithContentsOfFile:` (log 016 → nil), `hasPrefix:`/`hasSuffix:`, `intValue`, `substringToIndex:`, `substringWithRange:`, `stringByAppendingFormat:`, `stringByAppendingPathExtension:`, `isAbsolutePath`, `createDirectoryAtPath:attributes:`, `removeItemAtPath:error:`. `isFW3()` (`[[systemVersion substringToIndex:1] intValue] > 2`) devolvía siempre falso. Los ~128 restantes son UI de IGP/GLLive/picker de fotos.
+  - Vídeo: el hilo de audio de la cinemática fallaba en `pthread_create` (256 KB). Ahora loguea el código y reintenta con 128/64 KB.
+  - Mapa de decompilación: `python3 -I tools/decomp_map.py` → `decompiled/macho/decomp_map.html` (17.867 funciones de `__text`, 31 sin nombre, 12 nativas). Marcar funciones reconstruidas en `docs/decomp_status.tsv`.
+  - Build: ahora en el Mac (`./build.sh [Release|Debug|clean]`), sin WSL. vitaGL ya no se compila dentro de `vendor/` (los `.o`/`.a` viejos de WSL parecían actualizados y no linkeaban con GCC 10.3): CMake lo copia con rsync a `<build>/vitaGL-<hash de flags>/` y compila ahí. Build limpia verificada en el Mac.
+  - Pendiente de consola: confirmar softfp de 016 (vídeo negro/0.3 fps), hilo de audio, `strcpy(src=NULL)` tras saltar el vídeo.
+- **Iteration 018 (log 017):** llega al menú; el audio del vídeo se oye (el reintento del hilo funciona) y el fps sube a 14.7 (fix softfp de 016 confirmado).
+  - Vídeo sin imagen: `draw_video_frame` dibujaba en el FBO 320x480 del guest (bindeado desde `gles_init`) con viewport 960x544 y luego `vglSwapBuffers` mostraba el framebuffer 0 → pantalla negra (el readback 16,16,16 leía fuera del FBO). Fix: bindear el framebuffer 0 durante el dibujo del vídeo y restaurar el FBO después.
+  - Menú sin botones: la librería 2D (`RenderRegions`, `DrawRegion_NoClip_NoTranslat`, `FillRect`, `FillTriangle`, `DrawLine_NoClip_NoTranslat`) usa `glVertexPointer`/`glTexCoordPointer` con `GL_FIXED` + `glDrawElements`. `gles.c` solo convertía GL_FIXED→float en `glDrawArrays`; en `glDrawElements` vitaGL dibujaba con el puntero del draw anterior. Fix: pasar `GL_FIXED` directo a vitaGL (lo soporta nativamente, conversión en shader) y borrar la conversión en CPU.
+  - Corrección (log 018): esas funciones 2D son `gllive::` (online), no el menú. El fix de GL_FIXED sigue siendo válido pero no afectaba al menú.
+- **Iteration 019 (log 018):** el vídeo ya se ve, pero borroso; el menú sigue sin botones.
+  - Menú: lo dibuja gameswf (`render_handler_irrlicht`), que recorta con máscaras de stencil (`begin_submit_mask`: `glStencilFunc(GL_EQUAL, nivel)` + `GL_INCR`/`GL_DECR`). El FBO de `gles_init` no tenía stencil (vitaGL crea depth sin stencil si no se pide) → todo lo enmascarado fallaba el test. Fix: renderbuffer `GL_DEPTH24_STENCIL8` adjunto al FBO.
+  - Vídeo: `lowres=1` (heredado de otro port, donde la conversión tardaba 90 ms) decodificaba 480x320 → 240x160. Ahora `lowres=0` (el benchmark de arranque da 5.6 ms para 800x480).
+- **Iteration 020 (log 019 + 2 screenshots):** vídeo a 480x320 OK. Menú: solo el fondo 3D, sin UI de gameswf (`mainmenu.dat` es un SWF `FWS`; `EnGameswf::InitMainMenu`). iOS tenía depth 16 sin stencil (`EAGLView`: `GL_DEPTH_COMPONENT16` en `GL_DEPTH_ATTACHMENT`), así que el stencil no era la diferencia con iOS.
+  - Solo diagnóstico (`gles.c`, marcado `ponytail:` temporal): `[glerr]` nombra la función GL que levanta cada error; `[swfdiag]` loguea los draws de gameswf (xyz float stride 12): vértice, clip-space, color, estado depth/stencil/blend/alpha/scissor/viewport; y draw calls cada 300 frames.
+- **Iteration 021 (log 020):** `[glerr]` identifica los INVALID_ENUM: `glEnable(GL_DITHER)`, `glEnable(GL_LINE_SMOOTH)`, `glHint(GL_LINE_SMOOTH_HINT)`, `glPixelStorei(GL_UNPACK_ALIGNMENT, 1)` — todos benignos. **Cero draws de gameswf** (~31 draws/frame, todos del fondo 3D): gameswf no dibuja nada.
+  - `EnGameswf::Render` (0x4ec368) reimplementado en C en `patch.c` (1:1 con el pseudo-C) y logueando los flags que deciden si llama a `RenderFX::Render` (`+0x4c`, `+0x22`, `+0x6c/+0x70`, MenuFX, `+0x81`, `+0x2a/+0x2b`, `_s_gameoverMainmenu`).
+- **Iteration 022 (log 021 + dump 1793810227):** prefetch abort `PC=0x500`, `LR` en gameswf `begin_display`. Causa: el wrapper `[glerr]` de 021 (9 args `uint32_t`) — en AAPCS el callee es dueño del área de args en pila y GCC la usó como spill; el juego llamaba `glHint` con 2 args → pisó el frame del llamador (`0xc52,0x1102,1,0x500` en la pila). Lección: **nunca wrappers genéricos con >4 args para funciones del guest**. Wrapper borrado (ya cumplió: errores identificados).
+  - Primer `EnGameswf::Render`: `enabled22=1 show2b=1 menu!=NULL states=0` → llama a `RenderFX::Render(menu)`. `[swfdiag]` ahora loguea cualquier draw hecho dentro de `RenderFX::Render` y cuántos produce cada llamada.
+- **Iteration 023 (log 022):** `RenderFX::Render(menu)` se llama cada frame pero produce **0 draws**, y `MenuFX+0x118` (nº de estados) se queda en 0: `InitMainMenu` no encontró ningún `menu_*` en `mainmenu.dat` (SWF `FWS`) → menú vacío.
+  - gameswf reporta errores por `gameswf::log_error`/`log_msg` vía un callback que el juego no registra. Hookeados (0x5614b4/0x561448) → `[gameswf]` en el log. `fopen` en lectura que falla ahora es WARN salvo saves/profiles.
+- **Iteration 024 (log 023):** sin errores de gameswf ni `fopen` fallidos. Cadena del menú: `InitMainMenu` → `RenderFX::FindCharacters(root, "menu_")` (`CollectCharacters`: `strstr` del nombre, hijos en `+0xec/+0xf0`) → `RegisterMenu` → `MenuFX::RegisterState` (lista `+0x104/+0x108`) → `SetMenu("menu_StartMenu")` → `GetState` (`strcmp`) → push en la pila `+0x114/+0x118`. La pila queda en 0 → `GetState` devuelve NULL.
+  - Revisados otros ports Gameloft: Skater-Nation (iOS, mismo loader) tuvo los literales `'FWS'/'CWS'` rebaseados por `macho_prep.py`; aquí **no** aplica (0x562a30/34 no están en rebase.bin; nuestro `macho_prep.py` no escanea `__text`). DH3: gameswf necesita stencil (ya puesto en 019).
+  - Diagnóstico: en el primer `Render`, volcado de los estados registrados de MenuFX y del árbol de personajes del SWF (nombre, sprite, hijos, visible).
+- **Iteration 025 (log 024):** el volcado muestra el SWF sano: 24 estados registrados (incluido `menu_StartMenu`), árbol completo con `btn_*`, todos `visible=0`, pila vacía. Nadie hace push.
+  - Cadena real (iOS): `InitMainMenu` (rama `+0x27`) pone `_s_showLogo=1` → `updateTimerPages()` (0x1f734): `_s_showUBILogo` → 420 frames con `_ubiLogo` → `_s_showPlatform` → 250 frames con `_platLogo` → `_s_showPlatformOver=1` → `EnGameswf::UpdateTimerPages` → `SetMenu("menu_TouchScreen")`.
+  - `updateTimerPages()` solo la llama `-[AppController draw]`, disparado por un `NSTimer` de 1/60 s (`applicationDidFinishLaunching:`). `objc.c` devolvía un objeto falso y **nunca disparaba el timer**: `draw` no corría nunca (tampoco `LoadMenuRes`/pantallas de carga que hace `draw`).
+  - Fix `objc.c`: los timers con target = AppController se guardan y se disparan desde `CFRunLoopRunInMode`, que `ThreadRoutine` llama cada frame dentro de su mutex → `draw` corre en el hilo dueño de vitaGL, serializado con `GameLoop`.
+  - Herramienta: `tools/pcrefs.py` (xrefs exactos PIC ARM: `ldr rX,[pc,#]` → `add/ldr ...,pc,rX`); los xrefs del pseudo-C de Ghidra no ven los accesos vía `__nl_symbol_ptr`.
+  - Sin resolver: 16× `GL_INVALID_ENUM` tragados (origen desconocido; probablemente `glHint`/`glEnable` benignos), `strcpy(src=NULL)` tras saltar el vídeo, `UBISOFT.m4v`/`UBIMTL.m4v`/`LOGORP.m4v` no existen en el IPA.
+
 ---
 
 ## 4. Instructions for Console Testing (Phase 15)
@@ -404,3 +436,24 @@ To test the port on physical PlayStation Vita hardware:
      ```bash
      psvita-toolkit analyze <dump>.psp2dmp --elf build/princeofpersiawarriorwithin
      ```
+
+## Iteración 026 (log 025)
+- El NSTimer `draw` se registra (`[OBJC] NSTimer 0.0167s ... sel=draw`), pero el menú sigue vacío. El log terminó unos 10 s después de que empezara el render del menú, y la cadena de logos necesita 420+250 frames (~11 s, o el doble si el timer se saltaba un frame de cada dos por el plazo estricto).
+- Ahora el timer tiene una holgura de medio periodo, así que se dispara una vez por frame del bucle del juego.
+- `updateTimerPages` (0x1f7a8, 0x1f894, 0x1f89c): las esperas de 420 y 250 frames se parchearon a 2 frames, porque las UIImageView de los logos son falsas y no dibujan nada.
+- Diagnóstico `[OBJC] timer draw fire #N imp= showLogo= UBI= plat= platOver=` cada 300 disparos.
+
+## Iteración 027 (log 026): el menú se ve, la entrada no funciona
+- El menú y el selector de idioma ya se ven. Lo arregló el parche de la espera de logos de la 026.
+- Causa de que no funcionen ni el táctil ni los botones: `hook_INO_Joystick_Update` sustituía `_INO_Joystick_Update` (0xaaba8) por una versión que solo escribía los bits del pad. El original es el único que llama a `CTouchScreen::UpdateEvents`, así que la cola de PadTouchEvent nunca se vaciaba (tope de 300). Además, TouchManager::Update/IsKeyPressed y `EnGameswf::SetCursorState` (el cursor del menú) nunca se ejecutaban.
+- Arreglo: reimplementación 1:1 del original (UpdateEvents, TouchManager::Update, mapeo de IsKeyPressed a bits según la tabla del binario, y la cola con 0x6b45b8/0x6bf26c/0x6bf268), más los bits del pad ORed.
+- El envío de toques se movió del hilo principal (`patch_frame`) al hilo del juego, justo antes de UpdateEvents. El UITouch* falso ahora es un puntero a un objeto estable por dedo.
+- Diagnóstico: `[INPUT] touch down id raw -> game` en los primeros 16 toques. Coordenadas esperadas: horizontal de 480x320, igual que `-[EAGLView touchesChanged:]` (x=view.y, y=320-view.x).
+
+## Iteración 028 (log 027): ¡jugable!
+- El táctil y los controles funcionan. El usuario confirma en el juego: CROSS = saltar (bit 0), TRIANGLE = atacar (bit 2), CIRCLE/SQUARE = agarrar/soltar arma (bits 3/1), START = pausa (bit 9).
+- La defensa no estaba asignada a ningún botón físico. R1 pasa a usar el bit 6 (0x40), el único bit de acción (0–7) que ningún botón físico usaba. Antes R1 usaba el bit 5. No hay prueba estática del bit, porque los scripts de IA de Jade leen los bits por número.
+- Diagnóstico: `[INPUT] on-screen buttons -> INO bits 0x....` registra qué bit activa cada botón en pantalla. Basta tocar el escudo para confirmarlo.
+- En `controls.txt` se acepta `BITn` (por ejemplo `R1 = BIT6`), y `BLOCK` pasa a ser el bit 6.
+  - Log 027 — personaje translúcido in-game: iOS renderiza en un renderbuffer `kEAGLColorFormatRGB565` (único formato importado) → sin alpha, `GL_DST_ALPHA` = 1. `RenderState::Send` usa blends con `GL_DST_ALPHA`/`GL_ONE_MINUS_DST_ALPHA` (0x304/0x305); nuestro FBO RGBA8 guardaba el alpha de textura del personaje y las pasadas siguientes lo dejaban transparente. Fix (`gles.c`): `glColorMask` nunca escribe alpha y `glClearColor`/`glClearColorx` limpian alpha a 1 → semántica RGB565. Pendiente de verificar en consola.
+  - Tras el fix de alpha el príncipe sigue con triángulos faltantes y se le ven caras internas (capturas bg/fb 2026-11-04 19:57). Se descartaron: el combinador de vitaGL (GL_COMBINE MODULATE ×2, CONSTANT/PRIMARY), el fog (solo RGB), la pasada de sombra (`ShadowCasterList::Display` está vacía), el renombrado de VBO en `glBufferSubData` y la recarga del culling al cambiar de FBO. Experimento de una corrida (`gles.c`, marcado `ponytail:`): se ignora `glEnable(GL_CULL_FACE)` y se loguean `[cull] glFrontFace` y `[frustum]` near/far. Si el príncipe se ve sólido, la causa es el culling; si no, es depth.

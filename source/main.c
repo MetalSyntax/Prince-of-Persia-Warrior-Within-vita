@@ -131,7 +131,6 @@ int main(int argc, char *argv[]) {
     for (;;) {
         input_poll();
         ime_poll();
-        patch_frame();
         sceKernelDelayThread(8000); // ~120 Hz input sampling
     }
 

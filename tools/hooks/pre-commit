@@ -1,0 +1,8 @@
+#!/bin/sh
+# Regenerates docs/DECOMP_STATUS.md from the current source/ and stages it.
+# Enable once per clone: git config core.hooksPath tools/hooks
+# Skipped where the IPA-derived inputs are absent (clean clones).
+ROOT=$(git rev-parse --show-toplevel)
+[ -f "$ROOT/game_app/POP" ] && [ -f "$ROOT/decompiled/macho/POP.c" ] || exit 0
+python3 -I "$ROOT/tools/decomp_map.py" >/dev/null || { echo "pre-commit: tools/decomp_map.py failed" >&2; exit 1; }
+git add "$ROOT/docs/DECOMP_STATUS.md"

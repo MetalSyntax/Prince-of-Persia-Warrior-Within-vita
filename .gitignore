@@ -60,3 +60,8 @@ vendor/**/*.a
 
 # Config local de Claude Code
 .claude/
+
+# Arte con copyright (artwork del IPA / portadas) y capturas de consola -- no commitear
+screenshots/
+*.webp
+*.avif

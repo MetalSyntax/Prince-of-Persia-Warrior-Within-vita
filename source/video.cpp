@@ -1294,6 +1294,11 @@ static void draw_video_frame(const unsigned short *rgb565, unsigned w, unsigned 
     FIRST_DRAW_LOG("video: GL state saved (blend=%d depth=%d scissor=%d cull=%d tex=%d)",
                    savedBlend, savedDepthTest, savedScissor, savedCull, savedTex);
 
+    // The guest renders into gles.c's 320x480 FBO, but vglSwapBuffers shows framebuffer 0:
+    // drawing into the FBO here left the screen black (017). Draw straight to the screen.
+    GLint savedFbo = 0;
+    glGetIntegerv(GL_FRAMEBUFFER_BINDING, &savedFbo);
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
     glViewport(0, 0, VIDEO_TARGET_W, VIDEO_TARGET_H);
     glDisable(GL_BLEND);
     glDisable(GL_DEPTH_TEST);
@@ -1340,6 +1345,7 @@ static void draw_video_frame(const unsigned short *rgb565, unsigned w, unsigned 
     vglSwapBuffers(GL_FALSE);
     FIRST_DRAW_LOG("video: gl_swap() returned -- first frame fully presented");
 
+    glBindFramebuffer(GL_FRAMEBUFFER, (GLuint) savedFbo);
     glBindTexture(GL_TEXTURE_2D, (GLuint) savedTex);
     if (savedBlend) glEnable(GL_BLEND); else glDisable(GL_BLEND);
     if (savedDepthTest) glEnable(GL_DEPTH_TEST); else glDisable(GL_DEPTH_TEST);
@@ -1823,31 +1829,10 @@ int video_play(const char *name) {
                 // Permits speedups that are not strictly bit-exact. Harmless
                 // for a cutscene, measurably cheaper per macroblock.
                 P.vctx->flags2 |= AV_CODEC_FLAG2_FAST;
-                /*
-                 * Bug #25 (log #069): decode at half resolution. The startup
-                 * benchmark isolated yuv420p_planar_to_rgb565() at 90.7ms for
-                 * one 800x480 frame with no threads/GL/libavcodec involved --
-                 * the cost is intrinsic to pushing 384k pixels through this
-                 * CPU, not scheduler contention (VIDEO_DECODE_THREADS=1
-                 * already ruled that out). Decoding at 1/2 x 1/2 (400x240 for
-                 * the trailer, 424x240 for the in-race videos) quarters every
-                 * pixel-proportional stage at once: the NEON conversion
-                 * (~90ms -> ~22ms), the glTexSubImage2D upload (12.6ms ->
-                 * ~3ms: 192KB instead of 768KB), and the MPEG-4 decode itself
-                 * (~10ms -> ~4ms). The existing draw path already upscales
-                 * with GL_LINEAR onto the 720x432 FBO, so no other change is
-                 * needed; 400x240 is exactly the same 5:3 aspect as the
-                 * target, 424x240 letterboxes as before. A skippable cutscene
-                 * at 30fps soft beats a sharp one at 10fps.
-                 *
-                 * `lowres` is honored by the mpegvideo-family decoders (this
-                 * game's MPEG-4 Part 2 included); must be set before
-                 * avcodec_open2(). If a future FFmpeg build ever ignores it,
-                 * playback still works -- frames just come back full-size and
-                 * ring_push()/draw_video_frame() size themselves from
-                 * f->width/height dynamically, only slower.
-                 */
-                P.vctx->lowres = 1;
+                // Full resolution: this game's videos are 480x320 and the startup benchmark measures
+                // 5.6ms for an 800x480 NEON conversion. lowres=1 (inherited from a port whose
+                // conversion took 90ms) halved them to 240x160 and made them blurry (log 018).
+                P.vctx->lowres = 0;
                 if (avcodec_open2(P.vctx, codec, NULL) < 0) {
                     l_error("video: avcodec_open2 failed for video stream");
                     avcodec_free_context(&P.vctx);
@@ -1966,8 +1951,15 @@ int video_play(const char *name) {
     if (P.swr && P.aport >= 0) {
         pthread_attr_t attr;
         pthread_attr_init(&attr);
-        pthread_attr_setstacksize(&attr, 256 * 1024);
-        if (pthread_create(&audioThread, &attr, cutscene_audio_thread, NULL) == 0) {
+        // Log 016: 256 KB failed on hardware; retry smaller (AAC+swr need far less) and log rc.
+        int rc = -1;
+        for (size_t stack = 256 * 1024; stack >= 64 * 1024 && rc != 0; stack /= 2) {
+            pthread_attr_setstacksize(&attr, stack);
+            rc = pthread_create(&audioThread, &attr, cutscene_audio_thread, NULL);
+            if (rc != 0)
+                l_warn("video: audio thread pthread_create(stack=%u KB) -> %d", (unsigned) (stack / 1024), rc);
+        }
+        if (rc == 0) {
             audioThreadUp = true;
         } else {
             l_warn("video: could not start the cutscene audio thread -- cutscene will be silent");

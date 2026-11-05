@@ -1,97 +1,145 @@
-# iOS Mach-O Loader Boilerplate for PS Vita
+<h1 align="center">
+  Prince of Persia: Warrior Within · PS Vita Port
+</h1>
 
-A reusable boilerplate and scaffolding framework for porting classic 32-bit iOS games (ARMv6 / ARMv7, 32-bit Mach-O `MH_EXECUTE`) to the PlayStation Vita.
-This is the iOS counterpart to [`soloader-boilerplate`](https://github.com/Rinnegatamante/soloader-boilerplate) (Android), based on the proven, battle-tested architecture developed in [`Inotia2-vita`](file:///Volumes/TOSHIBA%20EXT/PSVITA%20Develop/Inotia2-vita).
+<p align="center">
+  <a href="#-status--playability">Status & Playability</a> •
+  <a href="#setup-instructions-for-players">How to install</a> •
+  <a href="#controls">Controls</a> •
+  <a href="#known-issues">Known Issues</a> •
+  <a href="#build-instructions-for-developers">How to compile</a> •
+  <a href="#credits--acknowledgments">Credits</a>
+</p>
 
----
-
-## Loader Architecture
-
-| Component | File(s) | Role & Emulation Functionality |
-|---|---|---|
-| **Mach-O Loader** | [`source/macho.c`](file:///Volumes/TOSHIBA%20EXT/PSVITA%20Develop/ios-loader-boilerplate/source/macho.c), [`source/macho.h`](file:///Volumes/TOSHIBA%20EXT/PSVITA%20Develop/ios-loader-boilerplate/source/macho.h) | Custom static dyld and 32-bit Mach-O executable loader with fixed base address (`MACHO_SLIDE = 0x98000000`). Applies data segment rebases, resolves import tables (`__la_symbol_ptr`, `__nl_symbol_ptr`), and binds stubs for unhandled symbols. |
-| **Assembly Glue & Trampolines** | [`source/asm.S`](file:///Volumes/TOSHIBA%20EXT/PSVITA%20Develop/ios-loader-boilerplate/source/asm.S) | `call_guest` and `call_guest6` (preserve `r9`). `ml_align_call` (bridges iOS 4-byte stack alignment to VitaSDK/newlib 8-byte AAPCS). `ml_unimpl_entry` (auto-logging unimplemented stub). |
-| **Darwin / POSIX Subsystem** | [`source/darwin.c`](file:///Volumes/TOSHIBA%20EXT/PSVITA%20Develop/ios-loader-boilerplate/source/darwin.c), [`source/darwin.h`](file:///Volumes/TOSHIBA%20EXT/PSVITA%20Develop/ios-loader-boilerplate/source/darwin.h) | Darwin libc, libgcc, pthreads, and sockets emulation. Thread-safe POSIX wrapper with `SceUID` tracking (prevents fatal crashes on `pthread_detach`). High-precision `mach_absolute_time()` mapped to `sceKernelGetProcessTimeWide()`. |
-| **Variadic Formatter** | [`source/darwin_printf.c`](file:///Volumes/TOSHIBA%20EXT/PSVITA%20Develop/ios-loader-boilerplate/source/darwin_printf.c), [`source/darwin_printf.h`](file:///Volumes/TOSHIBA%20EXT/PSVITA%20Develop/ios-loader-boilerplate/source/darwin_printf.h) | Printf engine tailored to Darwin's ARM ABI: reads 64-bit doubles and integers from unaligned word boundaries, with native support for Objective-C's `%@` specifier (`NSString*`). |
-| **Mini-runtime ObjC / UIKit** | [`source/objc.c`](file:///Volumes/TOSHIBA%20EXT/PSVITA%20Develop/ios-loader-boilerplate/source/objc.c), [`source/objc.h`](file:///Volumes/TOSHIBA%20EXT/PSVITA%20Develop/ios-loader-boilerplate/source/objc.h) | Fast selector-based dispatching with `objc_msgSend` and `objc_msgSend_stret`. Emulates `NSString`, `UIFont` (rendered using a FreeType glyph atlas), `NSBundle` (`resourcePath`), `NSCalendar`, `UIDevice`, and on-screen keyboard via `sceImeDialog`. |
-| **OpenGL ES Graphics Backend** | [`source/gles.c`](file:///Volumes/TOSHIBA%20EXT/PSVITA%20Develop/ios-loader-boilerplate/source/gles.c), [`source/gles.h`](file:///Volumes/TOSHIBA%20EXT/PSVITA%20Develop/ios-loader-boilerplate/source/gles.h), [`source/vitagl_no_splash.c`](file:///Volumes/TOSHIBA%20EXT/PSVITA%20Develop/ios-loader-boilerplate/source/vitagl_no_splash.c) | GLES1 and GLES2 pipeline powered by vendored `vitaGL` compiled with `SOFTFP_ABI=1`. Virtual FBO supports display orientation rotation and aspect-ratio scaling (portrait/landscape to Vita's native 960x544). Converts `GL_FIXED` vertex arrays and disables blocking splashscreens. |
-| **CgBI PNG Decoder** | [`source/cgbi.c`](file:///Volumes/TOSHIBA%20EXT/PSVITA%20Develop/ios-loader-boilerplate/source/cgbi.c), [`source/cgbi.h`](file:///Volumes/TOSHIBA%20EXT/PSVITA%20Develop/ios-loader-boilerplate/source/cgbi.h) | Native decompressor and BGR-to-RGB byte-swap converter for Apple's proprietary CgBI-optimized PNG assets, allowing intact IPA bundles to load directly without offline conversion. |
-| **CoreAudio Backend** | [`source/coreaudio.c`](file:///Volumes/TOSHIBA%20EXT/PSVITA%20Develop/ios-loader-boilerplate/source/coreaudio.c) | Emulates AudioUnit RemoteIO and AudioSession on a dedicated high-priority `sceAudioOut` audio thread. |
-| **Input Subsystem** | [`source/input.c`](file:///Volumes/TOSHIBA%20EXT/PSVITA%20Develop/ios-loader-boilerplate/source/input.c), [`source/input.h`](file:///Volumes/TOSHIBA%20EXT/PSVITA%20Develop/ios-loader-boilerplate/source/input.h) | Maps PS Vita physical buttons and front capacitive multitouch screen to iOS touch events (`UITouchPhaseBegan`, `Moved`, `Ended`). |
-| **Logging Subsystem** | [`source/log.c`](file:///Volumes/TOSHIBA%20EXT/PSVITA%20Develop/ios-loader-boilerplate/source/log.c), [`source/log.h`](file:///Volumes/TOSHIBA%20EXT/PSVITA%20Develop/ios-loader-boilerplate/source/log.h) | Rotating on-device file logger (`ux0:data/<slug>/logs/log_001.log` .. `log_999.log`) and live stdout streaming. |
-| **Game Patches & Glue** | [`source/patch.c`](file:///Volumes/TOSHIBA%20EXT/PSVITA%20Develop/ios-loader-boilerplate/source/patch.c), [`source/patch.h`](file:///Volumes/TOSHIBA%20EXT/PSVITA%20Develop/ios-loader-boilerplate/source/patch.h) | Dedicated hooks for game-specific memory patches, symbol redirection, and custom bypasses. |
+An unofficial, native **iOS-to-PS Vita wrapper port** of *Prince of Persia: Warrior Within* (iOS v1.0.7, originally developed by **Ubisoft / Gameloft**). The original 32-bit ARMv6 iOS executable runs unmodified on the Vita's CPU through a custom **Mach-O loader**. Native Vita code replaces the Apple frameworks it depends on: Darwin libc/pthreads, a minimal Objective-C/UIKit runtime, OpenGL ES 1.1 (on vitaGL), OpenAL, CoreAudio and the cutscene movie player (on FFmpeg).
 
 ---
 
-## Critical iOS on PS Vita ABI Rules
+## 🎮 Status & Playability
 
-1. **`r9` as a Scratch Register**:
-   - In Apple's Darwin ARMv6/v7 ABI, `r9` is an available scratch register (not callee-saved).
-   - In the standard ARM AAPCS (used by VitaSDK/newlib), `r9` is callee-saved or platform-reserved.
-   - **Rule**: The entire loader codebase MUST be compiled with `-ffixed-r9`, and any execution transfer into the game binary must transition through `call_guest` / `call_guest6` in [`source/asm.S`](file:///Volumes/TOSHIBA%20EXT/PSVITA%20Develop/ios-loader-boilerplate/source/asm.S) to prevent register corruption.
-2. **SoftFP Calling Convention**:
-   - iOS 32-bit binaries pass single and double precision floats in integer registers (`r0..r3`).
-   - `vitaGL` MUST be compiled with `SOFTFP_ABI=1` so that internal calls and GXM commands (`sceGxmSetViewport`, etc.) maintain proper argument alignment.
-3. **4-Byte Stack Alignment**:
-   - 32-bit iOS code only enforces 4-byte stack alignment.
-   - VitaSDK newlib functions (especially `printf`, `malloc`, and math routines) expect an 8-byte aligned stack (AAPCS).
-   - All C callbacks invoked by the game binary enter through `ml_align_call` to re-align `sp` to an 8-byte boundary before calling newlib or vitaGL.
-4. **FairPlay DRM Decryption**:
-   - The Mach-O executable in the IPA must be completely decrypted (`cryptid = 0`).
-   - Binaries dumped directly from an encrypted app package will crash immediately with a Data Abort when loaded.
+**Status: PLAYABLE (beta) (v01.00)**
 
----
+On physical hardware the game boots through intro videos and menus into gameplay, and is fully controllable with touch and physical buttons.
 
-## Included Tools (`tools/`)
-
-- [`tools/macho_prep.py`](file:///Volumes/TOSHIBA%20EXT/PSVITA%20Develop/ios-loader-boilerplate/tools/macho_prep.py): Analyzes thin or fat Mach-O executables, verifies `cryptid == 0`, scans `__DATA` pointers against symbols, and generates `rebase.bin`.
-- [`tools/annotate.py`](file:///Volumes/TOSHIBA%20EXT/PSVITA%20Develop/ios-loader-boilerplate/tools/annotate.py): Disassembles functions, resolving PIC calls, ObjC selectors, classes, and literal strings.
-- [`tools/cgbi_check.py`](file:///Volumes/TOSHIBA%20EXT/PSVITA%20Develop/ios-loader-boilerplate/tools/cgbi_check.py): Verifies and extracts Apple CgBI-compressed PNG files.
-- [`tools/printf_check.py`](file:///Volumes/TOSHIBA%20EXT/PSVITA%20Develop/ios-loader-boilerplate/tools/printf_check.py): Validates variadic string format specifiers and alignment.
-- [`tools/stage_data.sh`](file:///Volumes/TOSHIBA%20EXT/PSVITA%20Develop/ios-loader-boilerplate/tools/stage_data.sh): Packages and organizes game assets into `ux0_data/<slug>/`.
-- [`tools/deploy_data.py`](file:///Volumes/TOSHIBA%20EXT/PSVITA%20Develop/ios-loader-boilerplate/tools/deploy_data.py): Incremental FTP deployment directly to the PS Vita (VitaShell).
+- [x] **Mach-O Loader**: `__TEXT`/`__DATA` mapped at `0x98000000`, 2112/2112 external relocations, 10204 rebase words (from `rebase.bin`), 53 global constructors, 372 import thunks. *Verified on console.*
+- [x] **Graphics**: OpenGL ES 1.1 fixed-function → vitaGL. The 480x320 iOS framebuffer is rendered off-screen and scaled to 816x544 (pillarboxed) on the 960x544 screen. ~60 FPS in-game. *Verified on console.*
+- [x] **Menus (gameswf Flash UI)**: menus, language selection and tutorials render, including stencil-masked elements. *Verified on console.*
+- [x] **Touch & Controls**: front touchscreen drives the on-screen virtual pad and buttons. Physical buttons and both analog sticks are mapped. *Verified on console.*
+- [x] **Cutscenes**: `.m4v` movies decoded in software (FFmpeg) with AAC audio. They can be skipped with Cross, Circle or Start. *Verified on console.*
+- [x] **Audio**: OpenAL 1.1 (sound effects) and CoreAudio (streams) mapped to native Vita audio.
+- [x] **Saves**: the iOS `Documents/` folder is mapped to `ux0:data/princeofpersiawarriorwithin/saves/`.
+- [x] **Performance**: CPU 444 MHz, bus 222 MHz, GPU 222 MHz. VFP short-vector matrix routines replaced with native code.
+- [ ] **Prince model rendering**: some of the Prince's triangles are missing and inner faces show through (see Known Issues).
+- [ ] **Online features (GLLive)**: not supported.
 
 ---
 
-## LiveArea Assets (`extras/livearea/`)
+## Disclaimer
 
-The repository stores all LiveArea presentation assets in [`extras/livearea/`](file:///Volumes/TOSHIBA%20EXT/PSVITA%20Develop/ios-loader-boilerplate/extras/livearea):
-- `icon0.png`: 128×128 application icon (official iOS wordmark on light gray `#E5E5EA`).
-- `pic0.png`: 960×544 splash screen ("iPhone OS" in Helvetica Neue typography on charcoal `#202020`).
-- `startup.png`: 280×158 LiveArea startup gate button.
-- `bg0.png`: 840×500 LiveArea background (faceted geometric low-poly mesh in Apple slate gray).
-- `template.xml`: Vita LiveArea layout definition.
+**Prince of Persia** and **Prince of Persia: Warrior Within** are registered trademarks of **Ubisoft Entertainment**. The work presented in this repository is unofficial and is not produced, endorsed, or sanctioned by Ubisoft, Gameloft or any affiliated entities.
 
-These files are automatically mapped directly into `sce_sys/` inside the output `.vpk` by `vita_create_vpk` in `CMakeLists.txt`.
+This software does NOT contain original game code, binaries, copyrighted graphics, or game assets. The authors do not promote or condone piracy in any way. To play, you must provide your own legally obtained, **decrypted** copy of the iOS game (`.ipa`, v1.0.7).
 
 ---
 
-## Target Console Directory Layout (`ux0:data/<slug>/`)
+## Setup Instructions (For Players)
 
-```
-ux0:data/<slug>/
-  <AppName>.app/   Extracted iOS game bundle (.png, .caf, .fsb, plist assets)
-  rebase.bin       Rebase relocation table generated by tools/macho_prep.py
-  saves/           Game save directory (mapped to iOS Documents/ folder)
-  logs/            Runtime execution logs (log_001.log .. log_999.log)
-```
+1. **CFW & Plugins**: PS Vita on Custom Firmware (**Enso 3.60 / 3.65** recommended) with **kubridge** in `ur0:tai/config.txt`:
+   ```ini
+   *KERNEL
+   ur0:tai/kubridge.skprx
+   ```
+2. **Shader Compiler**: `libshacccg.suprx` must be in `ur0:data/` (extract it with **ShaRKBR33D**).
+3. **Game Files**: use a FairPlay-decrypted `Prince of Persia - Warrior Within` **v1.0.7** `.ipa` (`cryptid 0`; encrypted binaries crash at load):
+   - Unzip the `.ipa` and take the `Payload/*.app/` folder.
+   - Generate `rebase.bin` from the executable:
+     ```bash
+     python3 -I tools/macho_prep.py Payload/<App>.app/POP rebase.bin
+     ```
+4. **Copy to the Vita** (`ux0:data/princeofpersiawarriorwithin/`):
+   ```
+   ux0:data/princeofpersiawarriorwithin/
+     game_app/       contents of the .app folder (POP executable, .big/.MGM data, .m4v movies...)
+     rebase.bin      rebase table generated in step 3
+     controls.txt    optional — custom button mapping (see Controls)
+     saves/          created automatically — your save games
+     logs/           created automatically — one log per run
+   ```
+   `tools/stage_data.sh` builds this layout from the `.app` folder.
+5. **Install VPK**: install `princeofpersiawarriorwithin.vpk` (Title ID `PSVPOPWW1`) with VitaShell.
 
 ---
 
-## Quick Start & Port Initialization
+## Controls
 
-Using `psvita-toolkit`:
+| Input | Action | Status |
+| :---: | :--- | :---: |
+| **Touchscreen** | Original on-screen virtual pad and buttons | ✅ Working |
+| **Left stick / D-Pad** | Move | ✅ Working |
+| **Right stick** | Camera | ✅ Working |
+| **Cross** | Jump | ✅ Working |
+| **Triangle** | Attack | ✅ Working |
+| **Circle / Square** | Grab / drop weapon | ✅ Working |
+| **Start** | Pause / menu | ✅ Working |
+| **R1** | Block | ⚠️ Unverified |
+| **L1** | Time rewind | ⚠️ Unverified |
+| **Select** | Slow motion | ⚠️ Unverified |
+
+> [!TIP]
+> Buttons can be remapped with `ux0:data/princeofpersiawarriorwithin/controls.txt`, one `BUTTON = ACTION` per line.
+> Buttons: `CROSS SQUARE TRIANGLE CIRCLE L1 R1 SELECT START`. Actions: `JUMP ATTACK GRAB BLOCK REWIND WALLRUN SLOWMO MENU`, or a raw input bit such as `BIT6`.
+> ```
+> R1 = BLOCK
+> L1 = REWIND
+> ```
+> Blocking is always available through the on-screen shield button.
+
+---
+
+## Known Issues
+
+- **Prince model**: parts of the Prince are missing (thigh, back of the shoulder) and his inner faces show, so he looks partially see-through, with a dark moving silhouette. The cause is still under investigation. Blending/alpha, the texture combiner, fog and back-face culling have been ruled out. Depth is the next suspect.
+- **Cutscene frame rate**: movies are decoded in software (the hardware decoder fails to initialize) and play at ~14 FPS.
+- **R1 / L1 / Select mappings** have not been confirmed in game yet.
+- **Online features disabled**: the GLLive online services are not supported.
+- **Crash dumps** are written by the system to `ux0:data/` (not to the game folder).
+
+---
+
+## Build Instructions (For Developers)
+
+### Prerequisites
+
+- [VitaSDK](https://vitasdk.org/) **softfp** toolchain (`$VITASDK`), since iOS code passes floats in integer registers. vitaGL is vendored in `vendor/vitaGL` and built automatically with `SOFTFP_ABI=1`.
+- CMake 3.14+, Python 3 (for the tools).
+- Your own decrypted `.ipa`, unpacked locally (`game_app` symlink → the `.app` folder). It is never committed (`.gitignore`).
+
+### Compilation Commands
+
 ```bash
-# Initialize a new iOS port directly from an IPA file:
-psvita-toolkit init-port --ipa /path/to/game.ipa
-
-# Validate LiveArea assets:
-psvita-toolkit livearea validate
-
-# Build vitaGL with SoftFP ABI support:
-cd vendor/vitaGL && ./build_vitagl.sh
-
-# Configure and compile the VPK:
-cmake -B build
-cmake --build build
+cd Prince-of-Persia-Warrior-Within-vita
+./build.sh            # Release -> build/princeofpersiawarriorwithin.vpk
+./build.sh Debug      # adds loader debug logging
+./build.sh clean      # full rebuild
 ```
+
+### Deploy & Debug
+
+```bash
+tools/stage_data.sh                               # build ux0_data/princeofpersiawarriorwithin/
+python3 -I tools/deploy_data.py --ip <VITA_IP>    # incremental FTP upload (VitaShell FTP)
+python3 -I tools/deploy_data.py --ip <VITA_IP> --logs   # fetch the run logs
+```
+
+Guest addresses in logs and crash dumps are `0x98000000 + Mach-O vmaddr` (minus `0x1000` for the file offset of `__TEXT`). Architecture, ABI rules (`r9`, softfp, 4-byte stack alignment) and progress notes: [`PORTING_PLAN.md`](PORTING_PLAN.md) and [`port_progress.md`](port_progress.md).
+
+---
+
+## Credits & Acknowledgments
+
+- **Prince of Persia: Warrior Within** is intellectual property of **Ubisoft Entertainment**, built on Ubisoft's Jade engine. The iOS version was published by Gameloft.
+- **vitaGL** graphics library by [Rinnegatamante](https://github.com/Rinnegatamante/vitaGL).
+- **kubridge** plugin by [Bythos](https://github.com/bythos14/kubridge).
+- **so-loader** architecture and [soloader-boilerplate](https://github.com/Rinnegatamante/soloader-boilerplate) by Rinnegatamante (inspiration for this Mach-O loader).
+- **FFmpeg** for cutscene decoding, **OpenAL Soft** for audio (VitaSDK packages).
+- Special thanks to the PS Vita homebrew and porting community.

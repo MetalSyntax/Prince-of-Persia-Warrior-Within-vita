@@ -7,7 +7,7 @@
  *          During presentation (gles_present), the FBO is drawn rotated and scaled onto the native 960x544 screen.
  *
  *          All imported gl* functions take only integer/pointer arguments (*x variants): no SoftFP issues.
- *          GL_FIXED vertex arrays are converted to float immediately before draw calls.
+ *          GL_FIXED vertex arrays are passed to vitaGL as-is (it converts them in the shader).
  */
 #include <stdlib.h>
 #include <string.h>
@@ -46,55 +46,33 @@ static int client_unit; // glClientActiveTexture - GL_TEXTURE0
 static GLint env_mode = GL_MODULATE;
 static GLfixed color[4] = {0x10000, 0x10000, 0x10000, 0x10000};
 
-// ---------------------------------------------------------------- GL_FIXED arrays
+// ---------------------------------------------------------------- vertex arrays
+// vitaGL takes GL_FIXED pointers natively (shader-side conversion). The old CPU float conversion
+// only ran in glDrawArrays: glDrawElements (the 2D UI lib: RenderRegions, FillRect...) drew with a
+// stale pointer, so menu buttons were invisible (log 017). State is mirrored for gles_present.
 
-static float *conv_buf[3];
-static int conv_cap[3];
-
-static const void *fixed_to_float(const array_ptr *a, int n, int slot) {
-    int need = n * a->size;
-    if (need > conv_cap[slot]) {
-        conv_buf[slot] = realloc(conv_buf[slot], need * sizeof(float));
-        conv_cap[slot] = need;
-    }
-    int step = a->stride ? a->stride / 4 : a->size;
-    const int32_t *src = a->ptr;
-    float *dst = conv_buf[slot];
-    for (int i = 0; i < n; i++)
-        for (int c = 0; c < a->size; c++)
-            dst[i * a->size + c] = src[i * step + c] * (1.0f / 65536.0f);
-    return dst;
-}
-
-static void apply_vertex(int n) {
-    if (!vtx.size || (vtx.type == GL_FIXED && !n)) // GL_FIXED arrays are converted at draw time
-        return;
-    if (vtx.type == GL_FIXED)
-        glVertexPointer(vtx.size, GL_FLOAT, 0, fixed_to_float(&vtx, n, 0));
-    else
+static void apply_vertex(void) {
+    if (vtx.size)
         glVertexPointer(vtx.size, vtx.type, vtx.stride, vtx.ptr);
 }
 
-static void apply_texcoord(int unit, int n) {
+static void apply_texcoord(int unit) {
     array_ptr *a = &tc[unit];
-    if (!a->size || (a->type == GL_FIXED && !n))
+    if (!a->size)
         return;
     glClientActiveTexture(GL_TEXTURE0 + unit);
-    if (a->type == GL_FIXED)
-        glTexCoordPointer(a->size, GL_FLOAT, 0, fixed_to_float(a, n, 1 + unit));
-    else
-        glTexCoordPointer(a->size, a->type, a->stride, a->ptr);
+    glTexCoordPointer(a->size, a->type, a->stride, a->ptr);
     glClientActiveTexture(GL_TEXTURE0 + client_unit);
 }
 
 static void g_glVertexPointer(GLint size, GLenum type, GLsizei stride, const void *ptr) {
     vtx = (array_ptr){size, type, stride, ptr};
-    apply_vertex(0);
+    apply_vertex();
 }
 
 static void g_glTexCoordPointer(GLint size, GLenum type, GLsizei stride, const void *ptr) {
     tc[client_unit] = (array_ptr){size, type, stride, ptr};
-    apply_texcoord(client_unit, 0);
+    apply_texcoord(client_unit);
 }
 
 static void g_glClientActiveTexture(GLenum unit) {
@@ -108,14 +86,57 @@ uint32_t gles_get_draw_calls(void) {
     return gles_draw_calls;
 }
 
+// ---------------------------------------------------------------- diagnostics (log 019: no menu UI)
+// ponytail: temporary console-run instrumentation; remove once the gameswf menu renders.
+
+static const void *color_ptr;
+static GLenum color_type;
+static void g_glColorPointer(GLint size, GLenum type, GLsizei stride, const void *ptr) {
+    color_ptr = ptr, color_type = type;
+    glColorPointer(size, type, stride, ptr);
+}
+
+// Logs draws issued while gameswf renders (first 8, then every 2000th).
+int gles_in_swf; // set by patch.c around RenderFX::Render
+
+static void diag_swf_draw(GLenum mode, GLint first, GLsizei count) {
+    static uint32_t n;
+    if (!gles_in_swf)
+        return;
+    n++;
+    if (n > 8 && n % 2000)
+        return;
+    GLint vbo = 0, vp[4], sc[4], tex = 0, df = 0;
+    glGetIntegerv(GL_ARRAY_BUFFER_BINDING, &vbo);
+    glGetIntegerv(GL_VIEWPORT, vp);
+    glGetIntegerv(GL_SCISSOR_BOX, sc);
+    glGetIntegerv(GL_TEXTURE_BINDING_2D, &tex);
+    glGetIntegerv(GL_DEPTH_FUNC, &df);
+    float p[16], m[16], v[3] = {0}, c[4];
+    glGetFloatv(GL_PROJECTION_MATRIX, p);
+    glGetFloatv(GL_MODELVIEW_MATRIX, m);
+    if (!vbo && vtx.ptr && vtx.type == GL_FLOAT)
+        memcpy(v, (const char *)vtx.ptr + first * (vtx.stride ? vtx.stride : vtx.size * 4), vtx.size * 4);
+    float e[4];
+    for (int i = 0; i < 4; i++)
+        e[i] = m[i] * v[0] + m[4 + i] * v[1] + m[8 + i] * v[2] + m[12 + i];
+    for (int i = 0; i < 4; i++)
+        c[i] = p[i] * e[0] + p[4 + i] * e[1] + p[8 + i] * e[2] + p[12 + i] * e[3];
+    uint32_t rgba = 0;
+    if (glIsEnabled(GL_COLOR_ARRAY) && color_type == GL_UNSIGNED_BYTE && color_ptr && !vbo)
+        memcpy(&rgba, (const char *)color_ptr + first * 4, 4);
+    l_info("[swfdiag] #%u mode=%x n=%d vfmt=%d/%x/%d v0=(%.1f,%.1f,%.2f) clip=(%.2f,%.2f,%.2f,%.2f) rgba=%08x tex=%d vbo=%d "
+           "vp=%d,%d,%d,%d sc=%d,%d,%d,%d en:dep=%d(f=%x) stn=%d bl=%d at=%d cull=%d sci=%d t2d=%d carr=%d tarr=%d",
+           n, mode, count, vtx.size, vtx.type, vtx.stride, v[0], v[1], v[2], c[0], c[1], c[2], c[3], rgba, tex, vbo, vp[0], vp[1], vp[2], vp[3],
+           sc[0], sc[1], sc[2], sc[3], glIsEnabled(GL_DEPTH_TEST), df, glIsEnabled(GL_STENCIL_TEST),
+           glIsEnabled(GL_BLEND), glIsEnabled(GL_ALPHA_TEST), glIsEnabled(GL_CULL_FACE), glIsEnabled(GL_SCISSOR_TEST),
+           glIsEnabled(GL_TEXTURE_2D), glIsEnabled(GL_COLOR_ARRAY), glIsEnabled(GL_TEXTURE_COORD_ARRAY));
+}
+
+
 static void g_glDrawArrays(GLenum mode, GLint first, GLsizei count) {
     gles_draw_calls++;
-    int n = first + count;
-    if (vtx.type == GL_FIXED)
-        apply_vertex(n);
-    for (int u = 0; u < 2; u++)
-        if (tc[u].type == GL_FIXED)
-            apply_texcoord(u, n);
+    diag_swf_draw(mode, first, count);
     glDrawArrays(mode, first, count);
 }
 
@@ -193,14 +214,27 @@ void gles_init(void) {
     glGenFramebuffers(1, &fbo);
     glBindFramebuffer(GL_FRAMEBUFFER, fbo);
     glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, fbo_tex, 0);
+    // Depth + stencil: gameswf (menu UI) clips with stencil masks (GL_EQUAL on the mask depth).
+    // Without a stencil buffer every masked shape failed the test -> no buttons (log 018).
+    GLuint rb;
+    glGenRenderbuffers(1, &rb);
+    glBindRenderbuffer(GL_RENDERBUFFER, rb);
+    glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH24_STENCIL8, FB_W, FB_H);
+    glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT, GL_RENDERBUFFER, rb);
     glBindTexture(GL_TEXTURE_2D, 0);
     glViewport(0, 0, FB_W, FB_H);
     glClearColor(0, 0, 0, 1);
     glClear(GL_COLOR_BUFFER_BIT);
+    glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_FALSE); // RGB565 semantics, see g_glColorMask
     l_info("vitaGL: FBO %ux%u -> screen %ux%u at x=%d", FB_W, FB_H, DST_W, DST_H, DST_X);
 }
 
 void gles_present(void) {
+    static uint32_t frames, last_draws;
+    if (++frames % 300 == 0 && frames <= 3000) {
+        l_info("[swfdiag] frame %u: %u draw calls in last 300 frames", frames, gles_draw_calls - last_draws);
+        last_draws = gles_draw_calls;
+    }
     static const GLenum caps[] = {GL_BLEND, GL_ALPHA_TEST, GL_SCISSOR_TEST, GL_DEPTH_TEST, GL_TEXTURE_2D};
     GLboolean on[5], tca, va, ca, na;
     GLint tex, mode, active, vp[4];
@@ -268,15 +302,43 @@ void gles_present(void) {
     if (na)
         glEnableClientState(GL_NORMAL_ARRAY);
     glColor4x(color[0], color[1], color[2], color[3]);
-    apply_vertex(0);
-    apply_texcoord(0, 0);
+    apply_vertex();
+    apply_texcoord(0);
     glClientActiveTexture(GL_TEXTURE0 + client_unit);
     glActiveTexture(active);
 }
 
+// iOS draws into a kEAGLColorFormatRGB565 renderbuffer: no alpha, so GL_DST_ALPHA reads as 1.
+// RenderState::Send blends with GL_DST_ALPHA / GL_ONE_MINUS_DST_ALPHA; with the RGBA8 FBO the
+// character's texture alpha stayed in the buffer and later passes showed it see-through (log 027).
+// Keep FBO alpha at 1: never write alpha, always clear it to 1.
 static void g_glClearColorx(GLfixed r, GLfixed g, GLfixed b, GLfixed a) {
-    glClearColor((float)r / 65536.0f, (float)g / 65536.0f, (float)b / 65536.0f, (float)a / 65536.0f);
+    glClearColor((float)r / 65536.0f, (float)g / 65536.0f, (float)b / 65536.0f, 1.0f);
 }
+
+static void g_glClearColor(GLfloat r, GLfloat g, GLfloat b, GLfloat a) { glClearColor(r, g, b, 1.0f); }
+
+// Log 028 diagnostics: prince shows missing triangles; ignoring GL_CULL_FACE did not fix it.
+// ponytail: temporary logs (front face modes, frustum near/far) for the depth investigation.
+static void g_glFrontFace(GLenum mode) {
+    static GLenum seen[2];
+    if (mode != seen[0] && mode != seen[1]) {
+        seen[seen[0] ? 1 : 0] = mode;
+        l_info("[cull] glFrontFace(0x%X) first use", mode);
+    }
+    glFrontFace(mode);
+}
+
+static void g_glFrustumf(GLfloat l, GLfloat r, GLfloat b, GLfloat t, GLfloat n, GLfloat f) {
+    static int logged;
+    if (logged < 4) {
+        logged++;
+        l_info("[frustum] l=%.3f r=%.3f b=%.3f t=%.3f near=%.4f far=%.1f", l, r, b, t, n, f);
+    }
+    glFrustumf(l, r, b, t, n, f);
+}
+
+static void g_glColorMask(GLboolean r, GLboolean g, GLboolean b, GLboolean a) { glColorMask(r, g, b, GL_FALSE); }
 
 static void g_glTexEnvx(GLenum target, GLenum pname, GLfixed param) {
     if (pname == GL_TEXTURE_ENV_MODE)
@@ -287,6 +349,7 @@ static void g_glTexEnvx(GLenum target, GLenum pname, GLfixed param) {
 
 static void g_glDrawElements(GLenum mode, GLsizei count, GLenum type, const void *indices) {
     gles_draw_calls++;
+    diag_swf_draw(mode + 0x100, 0, count); // +0x100 marks DrawElements (v0 = first array vertex)
     glDrawElements(mode, count, type, indices);
 }
 
@@ -322,9 +385,9 @@ const import_entry gles_imports[] = {
     D(glRotatex), D(glScalex), D(glScissor), D(glShadeModel), D(glTexImage2D), D(glTexParameteri),
     D(glTexSubImage2D), D(glTranslatex), D(glViewport),
     D(glAlphaFunc), D(glBindBuffer), D(glBufferData), D(glBufferSubData),
-    D(glClearColor), D(glClearDepthf), D(glClearStencil), D(glColor4ub),
-    D(glColorMask), D(glColorPointer), D(glCompressedTexImage2D), D(glDeleteBuffers),
-    D(glDepthFunc), D(glFogf), D(glFogfv), D(glFrontFace), D(glFrustumf),
+    F(glClearColor, g_glClearColor), D(glClearDepthf), D(glClearStencil), D(glColor4ub),
+    F(glColorMask, g_glColorMask), F(glColorPointer, g_glColorPointer), D(glCompressedTexImage2D), D(glDeleteBuffers),
+    D(glDepthFunc), D(glFogf), D(glFogfv), F(glFrontFace, g_glFrontFace), F(glFrustumf, g_glFrustumf),
     D(glGenBuffers), F(glGetError, g_glGetError), D(glHint), D(glLineWidth), D(glLoadMatrixf),
     D(glMultMatrixf), D(glNormalPointer), D(glPixelStorei), D(glPointSize),
     D(glPolygonOffset), D(glReadPixels), D(glRotatef), D(glScalef),

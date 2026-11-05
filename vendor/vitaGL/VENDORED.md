@@ -12,7 +12,9 @@ que un clon fresco no compilaba. Ver la lista de cambios abajo.
 
 `samples/` se elimino (28MB, solo lo usa el target `make samples`, que este
 proyecto nunca invoca). Los artefactos de build (`*.o`, `libvitaGL.a`) estan
-gitignorados: los genera `build_vitagl.sh` + `make` desde CMakeLists.txt.
+gitignorados y NO se generan aca: CMakeLists.txt copia este arbol (rsync) a
+`<build>/vitaGL-<hash de flags>/` y compila ahi con el toolchain del host, asi un
+cambio de toolchain o de flags nunca linkea objetos viejos.
 
 ## Modificaciones locales respecto de cd3791e29ff7f1c0ab349f12c7231f4871ce6a75
 
@@ -32,8 +34,6 @@ Detalle:
   `source/reimpl/egl.c` de este port.
 - `Makefile`: `git rev-parse` con fallback a "unknown" (ya no hay repo git aca).
 - `source/vgl.c`: ver el diff completo abajo.
-- `build_vitagl.sh`: script propio de este port (NO es de upstream). Lo invoca
-  CMakeLists.txt para hacer `make clean` solo cuando cambian los flags.
 
 ## Diff completo contra upstream
 
