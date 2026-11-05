@@ -82,7 +82,7 @@ This software does NOT contain original game code, binaries, copyrighted graphic
 | **Circle** | Grab | ✅ Working |
 | **Square** | Drop weapon | ✅ Working |
 | **Start** | Pause / menu | ✅ Working |
-| **R** | Block | ⚠️ Unverified |
+| **R** | Block | ✅ Working |
 | **L** | Time rewind | ⚠️ Unverified |
 | **L + R** | Show / hide the on-screen touch controls | ⚠️ Unverified |
 | **Select** | Slow motion | ⚠️ Unverified |
@@ -101,7 +101,7 @@ This software does NOT contain original game code, binaries, copyrighted graphic
 ## Known Issues
 
 - **Cutscene frame rate**: movies are decoded in software (the hardware decoder fails to initialize) and play at ~14 FPS.
-- **L / R / Select mappings** have not been confirmed in game yet. L and R act after being held for 3 frames (~50 ms), so pressing L + R together never triggers a rewind or block.
+- **L / Select mappings** have not been confirmed in game yet. L and R act after being held for 3 frames (~50 ms), so pressing L + R together never triggers a rewind or block.
 - **Hiding the touch controls** (L + R) does not work yet: the on-screen controls stay visible.
 - **Online features disabled**: the GLLive online services are not supported.
 - **Crash dumps** are written by the system to `ux0:data/` (not to the game folder).

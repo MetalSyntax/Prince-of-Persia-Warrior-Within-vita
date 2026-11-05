@@ -479,3 +479,4 @@ To test the port on physical PlayStation Vita hardware:
 - Causa: `macho_hook_addr` saltaba directo a la función C. Los hooks recibían la pila de iOS (alineada a 4) sin pasar por `ml_align_call`. Fix en `macho.c`: todos los hooks entran por un thunk de `ml_align_call`, igual que los imports.
 - El bloqueo es el bit 5, confirmado: tocar el escudo en pantalla da `INO bits 0x0020`.
 - Ocultado del HUD: sigue sin líneas `[HUD]`. Se agregan `[INPUT] L/R pressed` (primera vez) y `[HUD] dump:`: al pulsar L + R se loguean los draws del frame (máx 80) con su caja en coordenadas de juego.
+- Confirmado en consola: recoger la espada ya no crashea (hooks alineados) y R bloquea (bit 5). Publicado como v1.0.0. Sigue pendiente el ocultado de los controles virtuales.

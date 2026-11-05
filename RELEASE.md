@@ -35,7 +35,7 @@ The tool also checks that the binary is decrypted (`cryptid 0`).
 | **Circle** | Grab | ✅ Working |
 | **Square** | Drop weapon | ✅ Working |
 | **Start** | Pause / menu | ✅ Working |
-| **R** | Block | ⚠️ Unverified |
+| **R** | Block | ✅ Working |
 | **L** | Time rewind | ⚠️ Unverified |
 | **L + R** | Show / hide the on-screen touch controls | ⚠️ Unverified |
 | **Select** | Slow motion | ⚠️ Unverified |
@@ -60,9 +60,8 @@ Buttons can be remapped in `ux0:data/princeofpersiawarriorwithin/controls.txt` (
 ## ⚠️ Known Issues
 
 - **Cutscenes** play at ~14 FPS (software decoding; the hardware decoder fails to initialize).
-- **L / R / Select** mappings have not been confirmed in game.
+- **L / Select** mappings have not been confirmed in game.
 - **Hiding the touch controls** (L + R) does not work yet: the controls stay visible. Physical buttons work regardless.
-- **Sword pickup crash fix** and **R = Block** are not yet confirmed on console.
 - **Online (GLLive)** features are not supported.
 
 Installation and build instructions: see [README.md](README.md).
