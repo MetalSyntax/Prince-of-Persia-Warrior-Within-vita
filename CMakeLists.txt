@@ -25,7 +25,10 @@ endif()
 
 ## vitaGL vendorizada con compilación en softfp (OBLIGATORIO para evitar pantalla negra en PS Vita)
 set(VITAGL_VENDOR_DIR ${CMAKE_CURRENT_SOURCE_DIR}/vendor/vitaGL)
-set(VITAGL_MAKE_FLAGS_STR "SOFTFP_ABI=1 NO_DEBUG=1 HAVE_SHADER_CACHE=1 NO_SPLASHSCREEN=1 HAVE_GLSL_UBOS=1 SAMPLERS_SPEEDHACK=1 DRAW_SPEEDHACK=2")
+# No DRAW_SPEEDHACK: it makes the GPU read client vertex arrays (>32 KB) straight from game memory at
+# scene end; the Prince is CPU-skinned into a reused buffer, so every part drew the last one's vertices
+# (missing triangles + a moving "ghost", logs 027-030). Client arrays must be copied per draw.
+set(VITAGL_MAKE_FLAGS_STR "SOFTFP_ABI=1 NO_DEBUG=1 HAVE_SHADER_CACHE=1 NO_SPLASHSCREEN=1 HAVE_GLSL_UBOS=1 SAMPLERS_SPEEDHACK=1")
 # vitasdk-softfp (--with-float=softfp) ships softfp libm/libmathneon: calling them with
 # pcs("aapcs-vfp") (vitaGL math_utils.h VGL_HARDFP, darwin.c HARDFP) passes floats in the wrong registers.
 execute_process(COMMAND ${CMAKE_C_COMPILER} -v ERROR_VARIABLE VITA_GCC_V OUTPUT_QUIET)

@@ -48,11 +48,11 @@ Buttons can be remapped in `ux0:data/princeofpersiawarriorwithin/controls.txt` (
 - **Menus**: the 420/250-frame logo waits are skipped, since the fake UIImageViews draw nothing.
 - **Input**: `_INO_Joystick_Update` is reimplemented 1:1, so the touch event queue is drained again. Touches are dispatched on the game thread. Physical buttons are ORed into the pad bits, and Block is moved to R1 (bit 6).
 - **Cutscenes**: FFmpeg software decoding of the `.m4v` movies, AAC audio thread (with stack-size retry), skip with Cross/Circle/Start.
+- **Character rendering**: vitaGL is built without `DRAW_SPEEDHACK`, which let the GPU read large client vertex arrays at scene end. The CPU-skinned Prince (one reused buffer) drew every body part with the last part's vertices: missing triangles and a moving "ghost".
 - **Toolchain**: built with the VitaSDK softfp toolchain so libm/libmathneon use the iOS float calling convention.
 
 ## ⚠️ Known Issues
 
-- **Prince model**: parts of the Prince are missing and his inner faces show through (partially see-through look, dark moving silhouette). The cause is still under investigation.
 - **Cutscenes** play at ~14 FPS (software decoding; the hardware decoder fails to initialize).
 - **R1 / L1 / Select** mappings have not been confirmed in game.
 - **Online (GLLive)** features are not supported.

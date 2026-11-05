@@ -29,7 +29,7 @@ On physical hardware the game boots through intro videos and menus into gameplay
 - [x] **Audio**: OpenAL 1.1 (sound effects) and CoreAudio (streams) mapped to native Vita audio.
 - [x] **Saves**: the iOS `Documents/` folder is mapped to `ux0:data/princeofpersiawarriorwithin/saves/`.
 - [x] **Performance**: CPU 444 MHz, bus 222 MHz, GPU 222 MHz. VFP short-vector matrix routines replaced with native code.
-- [ ] **Prince model rendering**: some of the Prince's triangles are missing and inner faces show through (see Known Issues).
+- [x] **Character rendering**: CPU-skinned models (the Prince) draw correctly; client vertex arrays are copied per draw. *Verified on console.*
 - [ ] **Online features (GLLive)**: not supported.
 
 ---
@@ -98,7 +98,6 @@ This software does NOT contain original game code, binaries, copyrighted graphic
 
 ## Known Issues
 
-- **Prince model**: parts of the Prince are missing (thigh, back of the shoulder) and his inner faces show, so he looks partially see-through, with a dark moving silhouette. The cause is still under investigation. Blending/alpha, the texture combiner, fog and back-face culling have been ruled out. Depth is the next suspect.
 - **Cutscene frame rate**: movies are decoded in software (the hardware decoder fails to initialize) and play at ~14 FPS.
 - **R1 / L1 / Select mappings** have not been confirmed in game yet.
 - **Online features disabled**: the GLLive online services are not supported.
