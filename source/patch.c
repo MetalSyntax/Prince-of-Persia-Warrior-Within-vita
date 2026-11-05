@@ -196,8 +196,27 @@ static void hook_INO_Joystick_Update(void) {
     if (pad.buttons & SCE_CTRL_SQUARE)   btn_mask |= s_cfg.square_action;
     if (pad.buttons & SCE_CTRL_TRIANGLE) btn_mask |= s_cfg.triangle_action;
     if (pad.buttons & SCE_CTRL_CIRCLE)   btn_mask |= s_cfg.circle_action;
-    if (pad.buttons & SCE_CTRL_L1)       btn_mask |= s_cfg.l1_action;
-    if (pad.buttons & SCE_CTRL_R1)       btn_mask |= s_cfg.r1_action;
+    // L + R toggles the on-screen touch controls (hidden by default, gles.c), as in Hero of Sparta II.
+    // L1/R1 also carry actions (rewind/block), so each acts only after 3 frames held alone: pressing
+    // both for the toggle never leaks a rewind or block.
+    extern int gles_hud_hidden;
+    static int l_frames, r_frames, lr_combo;
+    // Vita L/R are SCE_CTRL_LTRIGGER/RTRIGGER (0x100/0x200); SCE_CTRL_L1/R1 (0x400/0x800) only exist on
+    // DS3/DS4 pads (PS TV). Log 032: checking only L1/R1 meant L, R and L + R never did anything.
+    int l = (pad.buttons & (SCE_CTRL_LTRIGGER | SCE_CTRL_L1)) != 0, r = (pad.buttons & (SCE_CTRL_RTRIGGER | SCE_CTRL_R1)) != 0;
+    l_frames = l ? l_frames + 1 : 0;
+    r_frames = r ? r_frames + 1 : 0;
+    if (l && r) {
+        if (!lr_combo) {
+            gles_hud_hidden = !gles_hud_hidden;
+            l_info("[HUD] touch controls %s", gles_hud_hidden ? "hidden" : "visible");
+        }
+        lr_combo = 1;
+    } else if (!l && !r) {
+        lr_combo = 0;
+    }
+    if (!lr_combo && l_frames >= 3) btn_mask |= s_cfg.l1_action;
+    if (!lr_combo && r_frames >= 3) btn_mask |= s_cfg.r1_action;
     if (pad.buttons & SCE_CTRL_SELECT)   btn_mask |= s_cfg.select_action;
     if (pad.buttons & SCE_CTRL_START)    btn_mask |= s_cfg.start_action;
     *cur |= btn_mask;
@@ -380,54 +399,15 @@ static void hook_swf_log_msg(const char *fmt, ...) {
 }
 
 /*
- * EnGameswf::Render() @ 0x4ec368, reimplemented 1:1 from decompiled/macho/POP.c so the reason the
- * gameswf menu never draws (log 020: zero gameswf draw calls) gets logged. Logs the gating fields
- * whenever they change. ponytail: the logging is temporary; the C body can stay as matched code.
+ * EnGameswf::Render() @ 0x4ec368, reimplemented 1:1 from decompiled/macho/POP.c. Log 031: the
+ * [swfdiag] tree dump that used to run here on every state change wrote ~700 lines (~10 ms each) when
+ * the pause menu opened and froze the game for seconds; the diagnostics are gone.
  */
-// gameswf character: tu_string name at +0x78 (0xff = heap, ptr at +0x84; else inline at +0x79),
-// display-list children at +0xec/+0xf0 when is(2) (sprite). See RenderFX::CollectCharacters.
-static void swf_dump(uint8_t *ch, int depth, int *budget) {
-    if (!ch || --*budget < 0)
-        return;
-    const char *name = ch[0x78] == 0xff ? *(const char **)(ch + 0x84) : (const char *)ch + 0x79;
-    uint32_t *vt = *(uint32_t **)ch;
-    int sprite = call_guest((void *)vt[2], (uint32_t)ch, 2, 0, 0) != 0;
-    int n = sprite ? *(int *)(ch + 0xf0) : 0;
-    l_info("[swfdiag] %*s%p '%s' sprite=%d children=%d visible=%d", depth * 2, "", ch, name ? name : "(null)", sprite, n,
-           ch[0xde]);
-    if (depth < 4)
-        for (int i = 0; i < n; i++)
-            swf_dump((*(uint8_t ***)(ch + 0xec))[i], depth + 1, budget);
-}
-
-static void swf_dump_menu(uint8_t *menu) {
-    uint8_t *def = *(uint8_t **)(menu + 0x3c);
-    l_info("[swfdiag] MenuFX %p: registered states=%d, stack=%d, movie=%p", menu, *(int *)(menu + 0x108),
-           *(int *)(menu + 0x118), def);
-    for (int i = 0; i < *(int *)(menu + 0x108) && i < 32; i++)
-        l_info("[swfdiag]   state[%d] '%s'", i, (const char *)(*(uint8_t ***)(menu + 0x104))[i] + 8);
-    int budget = 80;
-    if (def)
-        swf_dump(*(uint8_t **)(def + 0x10), 0, &budget); // RenderFX::GetFlashRoot
-}
-
 static void hook_EnGameswf_Render(uint8_t *self) {
-    static uint32_t last_sig = 0xffffffff;
     uint8_t *menu = *(uint8_t **)self;
     uint8_t *alt = *(uint8_t **)(self + 0x70);
     uint8_t gameover = *(uint8_t *)(MACHO_SLIDE + 0x6b92b5); // _s_gameoverMainmenu
     int states = menu ? *(int *)(menu + 0x118) : -1;
-    uint32_t sig = self[0x4c] | self[0x22] << 1 | self[0x6c] << 2 | (alt != 0) << 3 | (menu != 0) << 4 |
-                   self[0x81] << 5 | self[0x2a] << 6 | self[0x2b] << 7 | gameover << 8 | (states > 0) << 9;
-    if (sig != last_sig) {
-        last_sig = sig;
-        if (menu)
-            swf_dump_menu(menu);
-        l_info("[swfdiag] EnGameswf::Render this=%p skip4c=%d enabled22=%d alt6c=%d alt70=%p menu=%p states=%d "
-               "f81=%d show2a=%d show2b=%d gameoverMM=%d",
-               self, self[0x4c], self[0x22], self[0x6c], alt, menu, states, self[0x81], self[0x2a], self[0x2b],
-               gameover);
-    }
 
     void *set_orient = (void *)(MACHO_SLIDE + 0x58fc84), *set_vp = (void *)(MACHO_SLIDE + 0x590b20);
     void *fx_render = (void *)(MACHO_SLIDE + 0x58fcb8);
@@ -454,13 +434,9 @@ static void hook_EnGameswf_Render(uint8_t *self) {
         call_guest6(set_vp, (uint32_t)alt, 0, 0, 320, 480, 0);
     }
     extern int gles_in_swf;
-    uint32_t d0 = gles_get_draw_calls();
-    gles_in_swf = 1;
+    gles_in_swf = fx == menu ? 2 : 1; // 2: menus are never touched by the HUD filter (gles.c)
     call_guest(fx_render, (uint32_t)fx, 0, 0, 0);
     gles_in_swf = 0;
-    static uint32_t calls;
-    if (++calls <= 3 || calls % 300 == 0)
-        l_info("[swfdiag] RenderFX::Render(%p) call %u -> %u draw calls", fx, calls, gles_get_draw_calls() - d0);
 }
 
 void patch_init(void) {

@@ -23,10 +23,11 @@
 #define FB_H 480
 #define SCR_W 960
 #define SCR_H 544
-// Destination rectangle: 480x320 scaled to Vita screen height (1.7x) and centered horizontally.
+// Fullscreen (as in Hero of Sparta II): the 480x320 game image is stretched to the whole 960x544
+// screen (x2 horizontally, x1.7 vertically). input.c maps touches with the same stretch.
 #define DST_H SCR_H
-#define DST_W (DST_H * FB_H / FB_W)
-#define DST_X ((SCR_W - DST_W) / 2)
+#define DST_W SCR_W
+#define DST_X 0
 
 #define GL_FRAMEBUFFER_COMPLETE_OES 0x8CD5
 #define GL_RENDERBUFFER_WIDTH_OES 0x8D42
@@ -86,58 +87,175 @@ uint32_t gles_get_draw_calls(void) {
     return gles_draw_calls;
 }
 
-// ---------------------------------------------------------------- diagnostics (log 019: no menu UI)
-// ponytail: temporary console-run instrumentation; remove once the gameswf menu renders.
+// gameswf render in progress: 1 = in-game HUD movie, 2 = MenuFX menu (pause etc.). Set by patch.c.
+int gles_in_swf;
 
-static const void *color_ptr;
-static GLenum color_type;
-static void g_glColorPointer(GLint size, GLenum type, GLsizei stride, const void *ptr) {
-    color_ptr = ptr, color_type = type;
-    glColorPointer(size, type, stride, ptr);
+// ---------------------------------------------------------------- touch controls (L + R)
+// The on-screen controls are hidden at draw level like in Hero of Sparta II: in 2D (orthographic)
+// quad draws using a HUD texture, every quad sitting on a control (joystick, jump, block, attack,
+// grab; 480x320 game space, measured on console screenshots) collapses to a point. HUD textures are
+// learned from a square control-sized sprite centered on a control, so subtitles, menus and the
+// health/sand dial are never touched. Touch input is unaffected (read before drawing).
+int gles_hud_hidden = 1;
+static const struct { float x, y, r; } hud_spots[] = {
+    {77, 246, 58},  // virtual joystick (ring + arrows + knob travel)
+    {446, 174, 30}, // jump
+    {387, 221, 30}, // block (shield)
+    {340, 279, 30}, // attack (sword)
+    {458, 288, 32}, // grab (hand)
+};
+#define NSPOTS (sizeof(hud_spots) / sizeof(hud_spots[0]))
+static GLuint hud_tex[4];
+static float *hud_buf;
+static int hud_cap;
+
+static void g_glDeleteTextures(GLsizei n, const GLuint *ids) {
+    for (int k = 0; k < n; k++)
+        for (unsigned i = 0; i < 4; i++)
+            if (hud_tex[i] == ids[k])
+                hud_tex[i] = 0;
+    glDeleteTextures(n, ids);
 }
 
-// Logs draws issued while gameswf renders (first 8, then every 2000th).
-int gles_in_swf; // set by patch.c around RenderFX::Render
+static float vtx_get(int i, int c) {
+    int es = vtx.type == GL_SHORT ? 2 : vtx.type == GL_BYTE ? 1 : 4;
+    const uint8_t *p = (const uint8_t *)vtx.ptr + i * (vtx.stride ? vtx.stride : vtx.size * es) + c * es;
+    switch (vtx.type) {
+    case GL_FLOAT: return *(const float *)p;
+    case GL_FIXED: return *(const int32_t *)p * (1.0f / 65536.0f);
+    case GL_SHORT: return *(const int16_t *)p;
+    default: return *(const int8_t *)p;
+    }
+}
 
-static void diag_swf_draw(GLenum mode, GLint first, GLsizei count) {
-    static uint32_t n;
-    if (!gles_in_swf)
+static int hud_spot(float cx, float cy) {
+    for (unsigned s = 0; s < NSPOTS; s++) {
+        float dx = cx - hud_spots[s].x, dy = cy - hud_spots[s].y;
+        if (dx * dx + dy * dy <= hud_spots[s].r * hud_spots[s].r)
+            return s;
+    }
+    return -1;
+}
+
+// ponytail: calibration log (log 032: nothing was hidden and no quad batch matched). Until a HUD
+// texture is learned, logs up to 24 small draws (<= 64 vertices; VBO, first and projection not
+// filtered) whose first vertex lands on a control, so the filter can be matched to how they draw.
+static void hud_calib(GLenum mode, GLint first, int n, int count) {
+    static int calib;
+    if (hud_tex[0] || calib >= 24 || !gles_hud_hidden || gles_in_swf == 2 || n > 64 || !vtx.size)
         return;
-    n++;
-    if (n > 8 && n % 2000)
+    GLint ab = 0, t = 0;
+    float p[16], v[16];
+    glGetIntegerv(GL_ARRAY_BUFFER_BINDING, &ab);
+    if (ab || !vtx.ptr) { // VBO: position unknown here, log the draw shape once per kind
+        static int vbo_logged;
+        if (vbo_logged++ < 4)
+            l_info("[HUD] calib: VBO draw mode=%x verts=%d count=%d vbo=%d swf=%d", mode, n, count, ab, gles_in_swf);
         return;
-    GLint vbo = 0, vp[4], sc[4], tex = 0, df = 0;
-    glGetIntegerv(GL_ARRAY_BUFFER_BINDING, &vbo);
-    glGetIntegerv(GL_VIEWPORT, vp);
-    glGetIntegerv(GL_SCISSOR_BOX, sc);
-    glGetIntegerv(GL_TEXTURE_BINDING_2D, &tex);
-    glGetIntegerv(GL_DEPTH_FUNC, &df);
-    float p[16], m[16], v[3] = {0}, c[4];
+    }
     glGetFloatv(GL_PROJECTION_MATRIX, p);
-    glGetFloatv(GL_MODELVIEW_MATRIX, m);
-    if (!vbo && vtx.ptr && vtx.type == GL_FLOAT)
-        memcpy(v, (const char *)vtx.ptr + first * (vtx.stride ? vtx.stride : vtx.size * 4), vtx.size * 4);
+    glGetFloatv(GL_MODELVIEW_MATRIX, v);
+    float x = vtx_get(first, 0), y = vtx_get(first, 1), z = vtx.size > 2 ? vtx_get(first, 2) : 0;
     float e[4];
     for (int i = 0; i < 4; i++)
-        e[i] = m[i] * v[0] + m[4 + i] * v[1] + m[8 + i] * v[2] + m[12 + i];
+        e[i] = v[i] * x + v[4 + i] * y + v[8 + i] * z + v[12 + i];
+    float c[4];
     for (int i = 0; i < 4; i++)
         c[i] = p[i] * e[0] + p[4 + i] * e[1] + p[8 + i] * e[2] + p[12 + i] * e[3];
-    uint32_t rgba = 0;
-    if (glIsEnabled(GL_COLOR_ARRAY) && color_type == GL_UNSIGNED_BYTE && color_ptr && !vbo)
-        memcpy(&rgba, (const char *)color_ptr + first * 4, 4);
-    l_info("[swfdiag] #%u mode=%x n=%d vfmt=%d/%x/%d v0=(%.1f,%.1f,%.2f) clip=(%.2f,%.2f,%.2f,%.2f) rgba=%08x tex=%d vbo=%d "
-           "vp=%d,%d,%d,%d sc=%d,%d,%d,%d en:dep=%d(f=%x) stn=%d bl=%d at=%d cull=%d sci=%d t2d=%d carr=%d tarr=%d",
-           n, mode, count, vtx.size, vtx.type, vtx.stride, v[0], v[1], v[2], c[0], c[1], c[2], c[3], rgba, tex, vbo, vp[0], vp[1], vp[2], vp[3],
-           sc[0], sc[1], sc[2], sc[3], glIsEnabled(GL_DEPTH_TEST), df, glIsEnabled(GL_STENCIL_TEST),
-           glIsEnabled(GL_BLEND), glIsEnabled(GL_ALPHA_TEST), glIsEnabled(GL_CULL_FACE), glIsEnabled(GL_SCISSOR_TEST),
-           glIsEnabled(GL_TEXTURE_2D), glIsEnabled(GL_COLOR_ARRAY), glIsEnabled(GL_TEXTURE_COORD_ARRAY));
+    if (c[3] == 0)
+        return;
+    int gx = (int)(240 * (1 - c[1] / c[3])), gy = (int)(160 * (1 - c[0] / c[3]));
+    if (hud_spot(gx, gy) < 0)
+        return;
+    glGetIntegerv(GL_TEXTURE_BINDING_2D, &t);
+    calib++;
+    l_info("[HUD] calib: mode=%x first=%d verts=%d count=%d vfmt=%d/%x/%d tex=%d swf=%d pm11=%.2f pm15=%.2f v0 at (%d,%d)",
+           mode, first, n, count, vtx.size, vtx.type, vtx.stride, t, gles_in_swf, p[11], p[15], gx, gy);
 }
 
+// Returns the vertex array to draw with (hidden quads collapsed) or NULL to draw the game's own.
+static const void *hud_filter(GLenum mode, int n, int count) {
+    if (!gles_hud_hidden || gles_in_swf == 2 || !vtx.ptr || vtx.size < 2 || n > 4096)
+        return NULL;
+    if (n < 4 || (n & 3))
+        return NULL;
+    // Quad batches only: indexed triangles (6 indices per 4 vertices), 4-vertex strip/fan sprites.
+    if (!(mode == GL_TRIANGLES && count == n / 4 * 6) && !((mode == GL_TRIANGLE_STRIP || mode == GL_TRIANGLE_FAN) && n == 4))
+        return NULL;
+    GLint ab = 0, tex = 0;
+    glGetIntegerv(GL_ARRAY_BUFFER_BINDING, &ab);
+    if (ab)
+        return NULL;
+    float pm[16], mv[16], m[16];
+    glGetFloatv(GL_PROJECTION_MATRIX, pm);
+    if (pm[15] == 0) // perspective (3D scene)
+        return NULL;
+    glGetIntegerv(GL_TEXTURE_BINDING_2D, &tex);
+    int known = 0;
+    for (unsigned i = 0; i < 4; i++)
+        known |= tex && hud_tex[i] == (GLuint)tex;
+    glGetFloatv(GL_MODELVIEW_MATRIX, mv);
+    for (int c = 0; c < 4; c++)
+        for (int r = 0; r < 4; r++)
+            m[c * 4 + r] = pm[r] * mv[c * 4] + pm[4 + r] * mv[c * 4 + 1] + pm[8 + r] * mv[c * 4 + 2] + pm[12 + r] * mv[c * 4 + 3];
+    int hidden = 0;
+    for (int q = 0; q < n; q += 4) {
+        float x0 = 1e9f, y0 = 1e9f, x1 = -1e9f, y1 = -1e9f;
+        for (int i = q; i < q + 4; i++) {
+            float x = vtx_get(i, 0), y = vtx_get(i, 1), z = vtx.size > 2 ? vtx_get(i, 2) : 0;
+            float nx = m[0] * x + m[4] * y + m[8] * z + m[12], ny = m[1] * x + m[5] * y + m[9] * z + m[13];
+            // NDC -> 480x320 landscape game space (inverse of the blit in gles_present).
+            float gx = 240 * (1 - ny), gy = 160 * (1 - nx);
+            x0 = gx < x0 ? gx : x0, x1 = gx > x1 ? gx : x1, y0 = gy < y0 ? gy : y0, y1 = gy > y1 ? gy : y1;
+        }
+        float w = x1 - x0, h = y1 - y0, cx = (x0 + x1) / 2, cy = (y0 + y1) / 2;
+        if (w > 120 || h > 120)
+            continue;
+        int s = hud_spot(cx, cy);
+        if (s < 0)
+            continue;
+        if (!known) {
+            // Learn: a square control-sized sprite centered on a control.
+            float dx = cx - hud_spots[s].x, dy = cy - hud_spots[s].y;
+            if (!tex || w < 24 || h < 24 || w > 1.3f * h || h > 1.3f * w || dx * dx + dy * dy > 12 * 12)
+                continue;
+            for (unsigned i = 0; i < 4; i++)
+                if (!hud_tex[i]) {
+                    hud_tex[i] = tex;
+                    break;
+                }
+            known = 1;
+            l_info("[HUD] control texture %d learned from a %dx%d sprite at (%d,%d)", tex, (int)w, (int)h, (int)cx, (int)cy);
+            q = -4; // rescan this batch now that the texture is known
+            hidden = 0;
+            continue;
+        }
+        if (!hidden) {
+            if (n * vtx.size > hud_cap) {
+                hud_cap = n * vtx.size;
+                hud_buf = realloc(hud_buf, hud_cap * sizeof(float));
+            }
+            for (int i = 0; i < n; i++)
+                for (int c = 0; c < vtx.size; c++)
+                    hud_buf[i * vtx.size + c] = vtx_get(i, c);
+        }
+        hidden++;
+        for (int i = q + 1; i < q + 4; i++)
+            memcpy(&hud_buf[i * vtx.size], &hud_buf[q * vtx.size], vtx.size * sizeof(float));
+    }
+    if (!hidden)
+        return NULL;
+    glVertexPointer(vtx.size, GL_FLOAT, 0, hud_buf);
+    return hud_buf;
+}
 
 static void g_glDrawArrays(GLenum mode, GLint first, GLsizei count) {
     gles_draw_calls++;
-    diag_swf_draw(mode, first, count);
+    hud_calib(mode, first, first + count, count);
+    const void *h = first ? NULL : hud_filter(mode, count, count);
     glDrawArrays(mode, first, count);
+    if (h)
+        apply_vertex();
 }
 
 static void g_glGetPointerv(GLenum pname, void **out) {
@@ -230,11 +348,6 @@ void gles_init(void) {
 }
 
 void gles_present(void) {
-    static uint32_t frames, last_draws;
-    if (++frames % 300 == 0 && frames <= 3000) {
-        l_info("[swfdiag] frame %u: %u draw calls in last 300 frames", frames, gles_draw_calls - last_draws);
-        last_draws = gles_draw_calls;
-    }
     static const GLenum caps[] = {GL_BLEND, GL_ALPHA_TEST, GL_SCISSOR_TEST, GL_DEPTH_TEST, GL_TEXTURE_2D};
     GLboolean on[5], tca, va, ca, na;
     GLint tex, mode, active, vp[4];
@@ -318,26 +431,6 @@ static void g_glClearColorx(GLfixed r, GLfixed g, GLfixed b, GLfixed a) {
 
 static void g_glClearColor(GLfloat r, GLfloat g, GLfloat b, GLfloat a) { glClearColor(r, g, b, 1.0f); }
 
-// Log 028 diagnostics: prince shows missing triangles; ignoring GL_CULL_FACE did not fix it.
-// ponytail: temporary logs (front face modes, frustum near/far) for the depth investigation.
-static void g_glFrontFace(GLenum mode) {
-    static GLenum seen[2];
-    if (mode != seen[0] && mode != seen[1]) {
-        seen[seen[0] ? 1 : 0] = mode;
-        l_info("[cull] glFrontFace(0x%X) first use", mode);
-    }
-    glFrontFace(mode);
-}
-
-static void g_glFrustumf(GLfloat l, GLfloat r, GLfloat b, GLfloat t, GLfloat n, GLfloat f) {
-    static int logged;
-    if (logged < 4) {
-        logged++;
-        l_info("[frustum] l=%.3f r=%.3f b=%.3f t=%.3f near=%.4f far=%.1f", l, r, b, t, n, f);
-    }
-    glFrustumf(l, r, b, t, n, f);
-}
-
 static void g_glColorMask(GLboolean r, GLboolean g, GLboolean b, GLboolean a) { glColorMask(r, g, b, GL_FALSE); }
 
 static void g_glTexEnvx(GLenum target, GLenum pname, GLfixed param) {
@@ -349,8 +442,28 @@ static void g_glTexEnvx(GLenum target, GLenum pname, GLfixed param) {
 
 static void g_glDrawElements(GLenum mode, GLsizei count, GLenum type, const void *indices) {
     gles_draw_calls++;
-    diag_swf_draw(mode + 0x100, 0, count); // +0x100 marks DrawElements (v0 = first array vertex)
+    const void *h = NULL;
+    GLint eb = 0;
+    float pm[16];
+    if (gles_hud_hidden) {
+        glGetIntegerv(GL_ELEMENT_ARRAY_BUFFER_BINDING, &eb);
+        glGetFloatv(GL_PROJECTION_MATRIX, pm);
+    }
+    // Index scan only for 2D (orthographic) draws, or small ones for the calibration log.
+    if (gles_hud_hidden && !eb && (pm[15] != 0 || (!hud_tex[0] && count <= 96)) && indices &&
+        (type == GL_UNSIGNED_SHORT || type == GL_UNSIGNED_BYTE)) {
+        int n = 0;
+        for (int i = 0; i < count; i++) {
+            int v = type == GL_UNSIGNED_BYTE ? ((const uint8_t *)indices)[i] : ((const uint16_t *)indices)[i];
+            if (v >= n)
+                n = v + 1;
+        }
+        hud_calib(mode, 0, n, count);
+        h = hud_filter(mode, n, count);
+    }
     glDrawElements(mode, count, type, indices);
+    if (h)
+        apply_vertex();
 }
 
 // MacIndexBuffer::Init treats any error after glGenBuffers as "no VBO" and skips glBufferData,
@@ -379,15 +492,15 @@ static void g_glGetTexEnvfv(GLenum target, GLenum pname, GLfloat *params) {
 
 const import_entry gles_imports[] = {
     D(glActiveTexture), D(glBindTexture), D(glBlendFunc), D(glClear), D(glCopyTexImage2D),
-    D(glCopyTexSubImage2D), D(glDeleteTextures), D(glDepthMask), D(glDisable), D(glDisableClientState),
+    D(glCopyTexSubImage2D), F(glDeleteTextures, g_glDeleteTextures), D(glDepthMask), D(glDisable), D(glDisableClientState),
     D(glEnable), D(glEnableClientState), D(glGenTextures), D(glGetIntegerv), D(glIsEnabled),
     D(glLoadIdentity), D(glLoadMatrixx), D(glMatrixMode), D(glOrthox), D(glPopMatrix), D(glPushMatrix),
     D(glRotatex), D(glScalex), D(glScissor), D(glShadeModel), D(glTexImage2D), D(glTexParameteri),
     D(glTexSubImage2D), D(glTranslatex), D(glViewport),
     D(glAlphaFunc), D(glBindBuffer), D(glBufferData), D(glBufferSubData),
     F(glClearColor, g_glClearColor), D(glClearDepthf), D(glClearStencil), D(glColor4ub),
-    F(glColorMask, g_glColorMask), F(glColorPointer, g_glColorPointer), D(glCompressedTexImage2D), D(glDeleteBuffers),
-    D(glDepthFunc), D(glFogf), D(glFogfv), F(glFrontFace, g_glFrontFace), F(glFrustumf, g_glFrustumf),
+    F(glColorMask, g_glColorMask), D(glColorPointer), D(glCompressedTexImage2D), D(glDeleteBuffers),
+    D(glDepthFunc), D(glFogf), D(glFogfv), D(glFrontFace), D(glFrustumf),
     D(glGenBuffers), F(glGetError, g_glGetError), D(glHint), D(glLineWidth), D(glLoadMatrixf),
     D(glMultMatrixf), D(glNormalPointer), D(glPixelStorei), D(glPointSize),
     D(glPolygonOffset), D(glReadPixels), D(glRotatef), D(glScalef),

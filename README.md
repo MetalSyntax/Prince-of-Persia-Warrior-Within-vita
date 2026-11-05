@@ -22,7 +22,7 @@ An unofficial, native **iOS-to-PS Vita wrapper port** of *Prince of Persia: Warr
 On physical hardware the game boots through intro videos and menus into gameplay, and is fully controllable with touch and physical buttons.
 
 - [x] **Mach-O Loader**: `__TEXT`/`__DATA` mapped at `0x98000000`, 2112/2112 external relocations, 10204 rebase words (from `rebase.bin`), 53 global constructors, 372 import thunks. *Verified on console.*
-- [x] **Graphics**: OpenGL ES 1.1 fixed-function → vitaGL. The 480x320 iOS framebuffer is rendered off-screen and scaled to 816x544 (pillarboxed) on the 960x544 screen. ~60 FPS in-game. *Verified on console.*
+- [x] **Graphics**: OpenGL ES 1.1 fixed-function → vitaGL. The 480x320 iOS framebuffer is rendered off-screen and stretched fullscreen to 960x544 (no black bars; touch is remapped to match). ~60 FPS in-game. *Verified on console.*
 - [x] **Menus (gameswf Flash UI)**: menus, language selection and tutorials render, including stencil-masked elements. *Verified on console.*
 - [x] **Touch & Controls**: front touchscreen drives the on-screen virtual pad and buttons. Physical buttons and both analog sticks are mapped. *Verified on console.*
 - [x] **Cutscenes**: `.m4v` movies decoded in software (FFmpeg) with AAC audio. They can be skipped with Cross, Circle or Start. *Verified on console.*
@@ -81,8 +81,9 @@ This software does NOT contain original game code, binaries, copyrighted graphic
 | **Triangle** | Attack | ✅ Working |
 | **Circle / Square** | Grab / drop weapon | ✅ Working |
 | **Start** | Pause / menu | ✅ Working |
-| **R1** | Block | ⚠️ Unverified |
-| **L1** | Time rewind | ⚠️ Unverified |
+| **R** | Block | ⚠️ Unverified |
+| **L** | Time rewind | ⚠️ Unverified |
+| **L + R** | Show / hide the on-screen touch controls | ⚠️ Unverified |
 | **Select** | Slow motion | ⚠️ Unverified |
 
 > [!TIP]
@@ -99,7 +100,8 @@ This software does NOT contain original game code, binaries, copyrighted graphic
 ## Known Issues
 
 - **Cutscene frame rate**: movies are decoded in software (the hardware decoder fails to initialize) and play at ~14 FPS.
-- **R1 / L1 / Select mappings** have not been confirmed in game yet.
+- **L / R / Select mappings** have not been confirmed in game yet. L and R act after being held for 3 frames (~50 ms), so pressing L + R together never triggers a rewind or block.
+- **Hiding the touch controls** (default, toggled with L + R) is still being calibrated: the controls may stay visible.
 - **Online features disabled**: the GLLive online services are not supported.
 - **Crash dumps** are written by the system to `ux0:data/` (not to the game folder).
 
