@@ -195,6 +195,10 @@ uintptr_t macho_sym(const char *name) {
 
 void macho_hook_addr(uintptr_t addr, void *dst) {
     if (!addr) return;
+    // Guest code only keeps sp 4-byte aligned (iOS ABI): enter hooks through ml_align_call like
+    // imports. Log 033: the sword pickup movie (UP_POWC.m4v) reached hook_StartMovieOnMainThread with
+    // sp % 8 == 4 and crashed in vitaGL glColor4f (vld1.64 [sp :64]); 64-bit varargs were garbage too.
+    dst = (void *)get_or_make_thunk((uintptr_t)dst, ml_align_call);
     int is_thumb = (addr & 1);
     uintptr_t a = addr & ~1;
 

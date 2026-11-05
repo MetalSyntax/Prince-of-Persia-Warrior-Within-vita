@@ -32,7 +32,8 @@ The tool also checks that the binary is decrypted (`cryptid 0`).
 | **Right stick** | Camera | ✅ Working |
 | **Cross** | Jump | ✅ Working |
 | **Triangle** | Attack | ✅ Working |
-| **Circle / Square** | Grab / drop weapon | ✅ Working |
+| **Circle** | Grab | ✅ Working |
+| **Square** | Drop weapon | ✅ Working |
 | **Start** | Pause / menu | ✅ Working |
 | **R** | Block | ⚠️ Unverified |
 | **L** | Time rewind | ⚠️ Unverified |
@@ -47,18 +48,21 @@ Buttons can be remapped in `ux0:data/princeofpersiawarriorwithin/controls.txt` (
 - **Graphics**: GLES 1.1 → vitaGL with an off-screen 320x480 framebuffer, rotated and stretched fullscreen to 960x544 (no black bars). A depth + stencil buffer makes the stencil-masked gameswf menus render. `GL_FIXED` vertex arrays are passed natively in `glDrawElements` (menu buttons were invisible before).
 - **Framebuffer alpha**: iOS renders into an RGB565 renderbuffer (no alpha), so the alpha channel is now never written and is always cleared to 1. This matches iOS `GL_DST_ALPHA` blending.
 - **Menus**: the 420/250-frame logo waits are skipped, since the fake UIImageViews draw nothing.
-- **Input**: `_INO_Joystick_Update` is reimplemented 1:1, so the touch event queue is drained again. Touches are dispatched on the game thread. Physical buttons are ORed into the pad bits, and Block is moved to R1 (bit 6).
+- **Input**: `_INO_Joystick_Update` is reimplemented 1:1, so the touch event queue is drained again. Touches are dispatched on the game thread. Physical buttons are ORed into the pad bits, and Block is on R (bit 5, the shield button: `VirtualButton` 11).
 - **Cutscenes**: FFmpeg software decoding of the `.m4v` movies, AAC audio thread (with stack-size retry), skip with Cross/Circle/Start.
 - **Character rendering**: vitaGL is built without `DRAW_SPEEDHACK`, which let the GPU read large client vertex arrays at scene end. The CPU-skinned Prince (one reused buffer) drew every body part with the last part's vertices: missing triangles and a moving "ghost".
 - **Pause menu**: opening it no longer freezes the game for seconds (a debug dump of the Flash UI tree was written to the log on every menu change).
 - **L / R**: the Vita shoulder buttons are `SCE_CTRL_LTRIGGER`/`RTRIGGER`; only the DS3/DS4 `L1`/`R1` codes were checked, so L and R did nothing.
+- **Hooks / stack alignment**: every game-function hook now enters through `ml_align_call`. Picking up the first sword plays `UP_POWC.m4v` from a game event with a 4-byte aligned stack, which crashed in vitaGL (`vld1.64 [sp :64]`).
+- **Block**: on R, using input bit 5 (the shield button, confirmed by touching it on console). The old bit 6 blocked nothing.
 - **Toolchain**: built with the VitaSDK softfp toolchain so libm/libmathneon use the iOS float calling convention.
 
 ## ⚠️ Known Issues
 
 - **Cutscenes** play at ~14 FPS (software decoding; the hardware decoder fails to initialize).
 - **L / R / Select** mappings have not been confirmed in game.
-- **Hiding the touch controls** (L + R) is still being calibrated.
+- **Hiding the touch controls** (L + R) does not work yet: the controls stay visible. Physical buttons work regardless.
+- **Sword pickup crash fix** and **R = Block** are not yet confirmed on console.
 - **Online (GLLive)** features are not supported.
 
 Installation and build instructions: see [README.md](README.md).

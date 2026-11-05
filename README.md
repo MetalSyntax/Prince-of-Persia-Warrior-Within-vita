@@ -79,7 +79,8 @@ This software does NOT contain original game code, binaries, copyrighted graphic
 | **Right stick** | Camera | ✅ Working |
 | **Cross** | Jump | ✅ Working |
 | **Triangle** | Attack | ✅ Working |
-| **Circle / Square** | Grab / drop weapon | ✅ Working |
+| **Circle** | Grab | ✅ Working |
+| **Square** | Drop weapon | ✅ Working |
 | **Start** | Pause / menu | ✅ Working |
 | **R** | Block | ⚠️ Unverified |
 | **L** | Time rewind | ⚠️ Unverified |
@@ -88,7 +89,7 @@ This software does NOT contain original game code, binaries, copyrighted graphic
 
 > [!TIP]
 > Buttons can be remapped with `ux0:data/princeofpersiawarriorwithin/controls.txt`, one `BUTTON = ACTION` per line.
-> Buttons: `CROSS SQUARE TRIANGLE CIRCLE L1 R1 SELECT START`. Actions: `JUMP ATTACK GRAB BLOCK REWIND WALLRUN SLOWMO MENU`, or a raw input bit such as `BIT6`.
+> Buttons: `CROSS SQUARE TRIANGLE CIRCLE L1 R1 SELECT START`. Actions: `JUMP ATTACK GRAB DROP BLOCK REWIND SLOWMO MENU`, or a raw input bit such as `BIT5`.
 > ```
 > R1 = BLOCK
 > L1 = REWIND
@@ -101,7 +102,7 @@ This software does NOT contain original game code, binaries, copyrighted graphic
 
 - **Cutscene frame rate**: movies are decoded in software (the hardware decoder fails to initialize) and play at ~14 FPS.
 - **L / R / Select mappings** have not been confirmed in game yet. L and R act after being held for 3 frames (~50 ms), so pressing L + R together never triggers a rewind or block.
-- **Hiding the touch controls** (default, toggled with L + R) is still being calibrated: the controls may stay visible.
+- **Hiding the touch controls** (L + R) does not work yet: the on-screen controls stay visible.
 - **Online features disabled**: the GLLive online services are not supported.
 - **Crash dumps** are written by the system to `ux0:data/` (not to the game folder).
 

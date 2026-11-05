@@ -55,12 +55,15 @@ typedef struct {
 } control_config;
 
 static control_config s_cfg = {
-    .cross_action = (1 << 0),    // Jump
-    .square_action = (1 << 1),   // Attack
-    .triangle_action = (1 << 2), // Grab / Sub Attack
-    .circle_action = (1 << 3),   // Action / Block / Roll
+    .cross_action = (1 << 0),    // Jump (confirmed on console, log 027)
+    .square_action = (1 << 1),   // Drop weapon (confirmed)
+    .triangle_action = (1 << 2), // Attack (confirmed)
+    .circle_action = (1 << 3),   // Grab (confirmed)
     .l1_action = (1 << 4),       // Time Rewind
-    .r1_action = (1 << 6),       // Block (bit 6: the only unmapped action bit, see log 027)
+    // Block = bit 5: the shield is VirtualButton 11, one of the three round action buttons (5 attack,
+    // 7 jump, 11 shield; inset rects in TouchManager::Init); ButtonKeyMap(7) = 11, and key 7 sets 0x20
+    // in _INO_Joystick_Update. Bit 6 (key 4 -> button 8) was a guess and blocked nothing.
+    .r1_action = (1 << 5),
     .select_action = (1 << 7),   // Slow Motion
     .start_action = (1 << 9),    // Pause / Menu
 };
@@ -80,14 +83,14 @@ static void load_controls_config(void) {
         if (sscanf(line, "%31s = %31s", btn, act) == 2) {
             uint32_t mask = 0;
             if (!strcasecmp(act, "JUMP")) mask = (1 << 0);
-            else if (!strcasecmp(act, "ATTACK")) mask = (1 << 1);
-            else if (!strcasecmp(act, "GRAB")) mask = (1 << 2);
-            else if (!strcasecmp(act, "BLOCK")) mask = (1 << 6);
+            else if (!strcasecmp(act, "ATTACK")) mask = (1 << 2);
+            else if (!strcasecmp(act, "GRAB")) mask = (1 << 3);
+            else if (!strcasecmp(act, "DROP")) mask = (1 << 1);
+            else if (!strcasecmp(act, "BLOCK")) mask = (1 << 5);
             else if (!strcasecmp(act, "REWIND")) mask = (1 << 4);
-            else if (!strcasecmp(act, "WALLRUN")) mask = (1 << 5);
             else if (!strcasecmp(act, "SLOWMO")) mask = (1 << 7);
             else if (!strcasecmp(act, "MENU")) mask = (1 << 9);
-            else if (!strncasecmp(act, "BIT", 3)) mask = 1u << (atoi(act + 3) & 31); // raw INO bit, e.g. BIT6
+            else if (!strncasecmp(act, "BIT", 3)) mask = 1u << (atoi(act + 3) & 31); // raw INO bit, e.g. BIT5
 
             if (!strcasecmp(btn, "CROSS")) s_cfg.cross_action = mask;
             else if (!strcasecmp(btn, "SQUARE")) s_cfg.square_action = mask;
@@ -204,12 +207,19 @@ static void hook_INO_Joystick_Update(void) {
     // Vita L/R are SCE_CTRL_LTRIGGER/RTRIGGER (0x100/0x200); SCE_CTRL_L1/R1 (0x400/0x800) only exist on
     // DS3/DS4 pads (PS TV). Log 032: checking only L1/R1 meant L, R and L + R never did anything.
     int l = (pad.buttons & (SCE_CTRL_LTRIGGER | SCE_CTRL_L1)) != 0, r = (pad.buttons & (SCE_CTRL_RTRIGGER | SCE_CTRL_R1)) != 0;
+    static int l_seen, r_seen; // log 033 had no [HUD] toggle line: confirm L/R reach this hook
+    if (l && !l_seen++)
+        l_info("[INPUT] L pressed (pad 0x%08x)", (unsigned)pad.buttons);
+    if (r && !r_seen++)
+        l_info("[INPUT] R pressed (pad 0x%08x)", (unsigned)pad.buttons);
     l_frames = l ? l_frames + 1 : 0;
     r_frames = r ? r_frames + 1 : 0;
     if (l && r) {
         if (!lr_combo) {
             gles_hud_hidden = !gles_hud_hidden;
             l_info("[HUD] touch controls %s", gles_hud_hidden ? "hidden" : "visible");
+            extern int gles_hud_dump;
+            gles_hud_dump = 1; // gles.c: log the next frame's draws (calibration)
         }
         lr_combo = 1;
     } else if (!l && !r) {

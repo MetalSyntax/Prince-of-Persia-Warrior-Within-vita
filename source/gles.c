@@ -140,6 +140,39 @@ static int hud_spot(float cx, float cy) {
 // ponytail: calibration log (log 032: nothing was hidden and no quad batch matched). Until a HUD
 // texture is learned, logs up to 24 small draws (<= 64 vertices; VBO, first and projection not
 // filtered) whose first vertex lands on a control, so the filter can be matched to how they draw.
+// ponytail: on-demand dump (log 033: still no [HUD] calib line). patch.c sets this on L + R; the next
+// frame logs every draw (80 max): shape, VBO, texture, projection kind and the bounding box of its
+// vertices in 480x320 game space, to see exactly how the touch controls are drawn.
+int gles_hud_dump;
+static void hud_dump(GLenum mode, GLint first, int n, int count, int indexed) {
+    static int lines;
+    if (gles_hud_dump != 1 || lines >= 80)
+        return;
+    lines++;
+    GLint ab = 0, t = 0;
+    float p[16], v[16];
+    glGetIntegerv(GL_ARRAY_BUFFER_BINDING, &ab);
+    glGetIntegerv(GL_TEXTURE_BINDING_2D, &t);
+    glGetFloatv(GL_PROJECTION_MATRIX, p);
+    glGetFloatv(GL_MODELVIEW_MATRIX, v);
+    float x0 = 1e9f, y0 = 1e9f, x1 = -1e9f, y1 = -1e9f;
+    if (!ab && vtx.ptr && vtx.size >= 2)
+        for (int i = first; i < n && i < first + 4096; i++) {
+            float x = vtx_get(i, 0), y = vtx_get(i, 1), z = vtx.size > 2 ? vtx_get(i, 2) : 0, e[4], c[4];
+            for (int k = 0; k < 4; k++)
+                e[k] = v[k] * x + v[4 + k] * y + v[8 + k] * z + v[12 + k];
+            for (int k = 0; k < 4; k++)
+                c[k] = p[k] * e[0] + p[4 + k] * e[1] + p[8 + k] * e[2] + p[12 + k] * e[3];
+            if (c[3] == 0)
+                continue;
+            float gx = 240 * (1 - c[1] / c[3]), gy = 160 * (1 - c[0] / c[3]);
+            x0 = gx < x0 ? gx : x0, x1 = gx > x1 ? gx : x1, y0 = gy < y0 ? gy : y0, y1 = gy > y1 ? gy : y1;
+        }
+    l_info("[HUD] dump: %s mode=%x first=%d verts=%d count=%d vfmt=%d/%x/%d vbo=%d tex=%d swf=%d pm15=%.2f box=(%d,%d)-(%d,%d)",
+           indexed ? "elems" : "arrays", mode, first, n, count, vtx.size, vtx.type, vtx.stride, ab, t, gles_in_swf, p[15],
+           (int)x0, (int)y0, (int)x1, (int)y1);
+}
+
 static void hud_calib(GLenum mode, GLint first, int n, int count) {
     static int calib;
     if (hud_tex[0] || calib >= 24 || !gles_hud_hidden || gles_in_swf == 2 || n > 64 || !vtx.size)
@@ -252,6 +285,7 @@ static const void *hud_filter(GLenum mode, int n, int count) {
 static void g_glDrawArrays(GLenum mode, GLint first, GLsizei count) {
     gles_draw_calls++;
     hud_calib(mode, first, first + count, count);
+    hud_dump(mode, first, first + count, count, 0);
     const void *h = first ? NULL : hud_filter(mode, count, count);
     glDrawArrays(mode, first, count);
     if (h)
@@ -348,6 +382,10 @@ void gles_init(void) {
 }
 
 void gles_present(void) {
+    if (gles_hud_dump)
+        gles_hud_dump++; // 1 = dumping this frame (set by L + R), then stop
+    if (gles_hud_dump > 2)
+        gles_hud_dump = 0;
     static const GLenum caps[] = {GL_BLEND, GL_ALPHA_TEST, GL_SCISSOR_TEST, GL_DEPTH_TEST, GL_TEXTURE_2D};
     GLboolean on[5], tca, va, ca, na;
     GLint tex, mode, active, vp[4];
@@ -460,6 +498,16 @@ static void g_glDrawElements(GLenum mode, GLsizei count, GLenum type, const void
         }
         hud_calib(mode, 0, n, count);
         h = hud_filter(mode, n, count);
+    }
+    if (gles_hud_dump == 1) {
+        int n = 0;
+        if (!eb && indices && type != GL_UNSIGNED_INT)
+            for (int i = 0; i < count; i++) {
+                int v = type == GL_UNSIGNED_BYTE ? ((const uint8_t *)indices)[i] : ((const uint16_t *)indices)[i];
+                if (v >= n)
+                    n = v + 1;
+            }
+        hud_dump(mode, 0, n, count, 1);
     }
     glDrawElements(mode, count, type, indices);
     if (h)
