@@ -137,6 +137,27 @@ Guest addresses in logs and crash dumps are `0x98000000 + Mach-O vmaddr` (minus 
 
 ---
 
+## ☕ Support My Work
+
+This project is **free** and will stay free. If you enjoy it, a tip from **$1** helps me keep porting games to the PS Vita:
+
+<p align="center">
+  <a href="https://ko-fi.com/metalsyntax"><img src="https://ko-fi.com/img/githubbutton_sm.svg" alt="Support me on Ko-fi"></a>
+</p>
+
+- **Ko-fi:** [ko-fi.com/metalsyntax](https://ko-fi.com/metalsyntax)
+- **PayPal:** [paypal.me/MetalSyntax](https://paypal.me/MetalSyntax)
+- **Bitcoin (BTC):** `133HdCsaWxdjTfmwpgGVykByhNBV338uRc`
+
+**Ko-fi supporters get:**
+- **Early access** to new ports before their public release (test builds of upcoming projects).
+- **Data preparation scripts and step-by-step guides** to set up your own game files for each new port.
+- A say in which games I port next.
+
+> Game files are never distributed. You always need your own legally obtained copy of the game.
+
+---
+
 ## Credits & Acknowledgments
 
 - **Prince of Persia: Warrior Within** is intellectual property of **Ubisoft Entertainment**, built on Ubisoft's Jade engine. The iOS version was published by Gameloft.
