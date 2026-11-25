@@ -480,3 +480,113 @@ To test the port on physical PlayStation Vita hardware:
 - El bloqueo es el bit 5, confirmado: tocar el escudo en pantalla da `INO bits 0x0020`.
 - Ocultado del HUD: sigue sin líneas `[HUD]`. Se agregan `[INPUT] L/R pressed` (primera vez) y `[HUD] dump:`: al pulsar L + R se loguean los draws del frame (máx 80) con su caja en coordenadas de juego.
 - Confirmado en consola: recoger la espada ya no crashea (hooks alineados) y R bloquea (bit 5). Publicado como v1.0.0. Sigue pendiente el ocultado de los controles virtuales.
+
+## Iteración 034: menú de opciones (Select+Start) de Ferrari/HAWX/Zenonia2/Inotia4
+- Nuevo menú de opciones, abierto con **Select + Start**: el juego queda en pausa detrás de un panel translúcido. Port del menú de HAWX-vita / Ferrari-GT-Evolution-vita (misma familia que Zenonia2-vita e Inotia4). **Sin probar en consola.**
+- Filas:
+  - Editor de botones: una fila por acción (Jump = Cross, Drop weapon = Square, Attack = Triangle, Grab weapon = Circle, Rewind time = L, Block = R, Slow motion = Select, Pause = Start). X = pulsar el botón nuevo (si otra acción lo usa, se intercambian); Triangle = sin botón. Se guarda en `ux0:data/princeofpersiawarriorwithin/controls.txt` (líneas `BOTÓN = ACCIÓN`, también `BITn`; `L1`/`R1` son alias de `L`/`R`). El D-pad no se remapea (mueve al Príncipe).
+  - On-screen controls (mostrar/ocultar, igual que L+R en juego).
+  - Screen size: Full screen (por defecto) o Original aspect 816x544 con barras negras laterales; el táctil sigue a la imagen.
+  - Screen filter: Bilinear (por defecto) o Sharp bilinear.
+  - Anti-aliasing: MSAA off / 2x / 4x (se aplica al reiniciar).
+  - FPS counter on/off y FPS limit off / 30.
+  - Save & close.
+- Se guarda en `options.txt` de la misma carpeta: `filter=bilinear|sharp`, `msaa=0|2|4`, `stretch=1|0`, `show_fps=0|1`, `fps_cap=0|30`, `hud_hidden=1|0`. El toggle de L+R también se guarda ahí.
+- Select y Start solos ahora actúan tras mantenerse ~3 frames solos (igual que L y R ya hacían), así que la combinación Select+Start nunca dispara slow motion ni pausa.
+- No portado (solo para port_progress):
+  - Pack de traducción al español/portugués (Zenonia2/Inotia4): PoP WW ya tiene su selección de idioma en el juego.
+  - Selector de velocidad del juego (Inotia4): PoP ya corre a ~60 FPS; el límite de FPS lo cubre.
+  - Fila de rotación: no hace falta en este juego horizontal.
+- Archivos tocados:
+  - `source/options.c` (nuevo): menú, lectura y escritura de `options.txt`.
+  - `source/options.h` (nuevo).
+  - `source/font8x8.c` (nuevo): fuente para el menú.
+  - `source/gles.c`: present/draw_screen, `gles_dest_rect` y restauración de la función de blend.
+  - `source/input.c`: mapeo táctil.
+  - `source/patch.c`: tabla de acciones `s_act` (la que edita el menú y lee `controls.txt`) y `combo_filter` para Select+Start.
+  - `CMakeLists.txt`: añade `source/options.c` y `source/font8x8.c`.
+- **Pendiente de consola:** abrir el menú con Select+Start, recorrer todas las filas, remapear un botón e intercambiarlo, comprobar `controls.txt` y `options.txt`, MSAA tras reiniciar, FPS counter/limit, y que Select/Start solos siguen funcionando (slow motion y pausa) sin disparar el combo.
+
+## Iteración 035 (log 035): ocultar controles táctiles con la función del juego
+- Log 035: el menú Select+Start abre, guarda y no rompe nada. L+R alternaba la bandera pero los controles seguían visibles: en partida **todos** los draws (HUD incluido) usan proyección en perspectiva (`pm15=0`), así que el filtro geométrico de `gles.c` (solo 2D ortográfico) nunca coincidía. Se quitó entero (filtro, calibración y volcado `[HUD] dump`, `gles_in_swf`).
+- `VirtualButton/VirtualFanButton/VirtualDirectionButton::DrawButton` solo dibujan rectángulos de depuración, y `TouchManager::DrawButtons` es un `bx lr`.
+- El juego tiene `GameInterface_Set_Buttons_Visible(bool)` (0xe584): manda el mensaje de IA 0x6e (mostrar) / 0x6f (ocultar) al GAO de la interfaz (clave 0x0e00027f) vía `_AI_EvalFunc_WORGetGaoFromKey_C` (0xdf880) + `_AI_EvalFunc_MSGSend_C` (0xd8cf4).
+- Pedido del usuario: ocultar = **opacidad 0 %** (los controles siguen respondiendo). Fix (`patch.c`): hook 1:1 de `_GFX_i_Interface_Render` (0x6242c; 64 ranuras, se dibuja el item si `item+4 & 1`). Una vez en partida se "sondea": se manda 0x6f, las ranuras que pierden el bit 0 son los botones, y se manda 0x6e de vuelta. Con `opt_hud_hidden` esas ranuras se dibujan con `glColorMask` apagado (`gles_color_mask_off`). Vida/arena no se tocan.
+- Log: `[HUD] probe: visible slots ...` y `[HUD] probe: after hide ... -> button slots ...`. Si `button slots` sale 0, el 0x6f no usa el bit 0 (o el render es diferido) → siguiente paso según el log.
+- Pendiente de consola.
+
+## Iteración 036 (log 036): cierre al arrancar con MSAA 4x
+- El log 035 guardó `msaa=4` desde el menú. En el 036 (primer arranque con MSAA 4x activo en `vglInitExtended`) el juego llama `exit(1)` justo después de `applicationDidFinishLaunching`, sin dump y antes del primer frame (no llegó al sondeo del HUD).
+- Causa probable: memoria/FBO multisample de vitaGL. Fix: se quitó la fila MSAA del menú y `options_load` ignora `msaa=` (siempre 0). README a corregir (ya no hay MSAA).
+- Pendiente de consola: arranque normal + sondeo `[HUD] probe:`.
+
+## Iteración 037 (log 037): el sondeo apagó toda la interfaz; START no pausaba
+- `[HUD] probe: visible slots 0x0000060921ffffc9, sent hide` y nunca la segunda línea: el mensaje 0x6f oculta la interfaz ENTERA, deja de llamarse `_GFX_i_Interface_Render` y el "show" no se mandaba → todo invisible y sin forma de volver. Sondeo quitado.
+- Nuevo método: cada ranura se mide una vez (`gles_box_on`/`gles_box` en `gles.c`: caja de sus draws con arrays de cliente, en espacio 480x320) y es control si el centro cae en un `hud_spots` (joystick, saltar, bloquear, atacar, agarrar). Log `[HUD] slot N item ... box ... -> CONTROL|other`.
+- START no pausaba: regresión del gate de combos (Select/Start solo llegaban tras 3 frames sostenidos; un toque corto nunca). Fix: un toque corto sin el otro botón se envía 3 frames al soltar (`combo_filter`, prueba de host OK).
+- Pendiente de consola.
+
+## Iteración 038 (log 038): lento y controles sin ocultar
+- Lentitud: 1283 líneas `[HUD] slot` (~10 ms cada una). Hay dos interfaces GFX que comparten índices de ranura, así que el cambio de item hacía re-medir y loguear en cada frame. Todas las cajas vacías: los items de `_GFX_i_Interface_Render` son diferidos (se dibujan luego en `_DoDrawGfx`) y además son los medidores (CircularBar/CenteredQuad), no los botones. Hook, medición (`gles_box`) y log quitados.
+- Los controles táctiles son la página magma del juego: `TouchManager` le manda el táctil (`SendMagmaPos/SendMagmaButton`) y `_WOR_Render` la dibuja con `magma::PageStack::Draw` (0x8ddcc, única llamada en 0x46bf38) después de `_DoDrawGfx`. Fix: hook con trampolín (`macho_code` en `macho.c`: las 2 instrucciones pisadas con el literal del `ldr` resuelto + salto a Draw+8) que dibuja la página con `glColorMask` apagado si `opt_hud_hidden`. `g_glColorMask` no reactiva el color mientras tanto.
+- Nueva fila "iPhone profile" (como Asphalt-Audi-RS3-iOS-vita): `device=` en options.txt → `hw.machine` (`darwin.c`), al reiniciar. En PoP solo decide `g_is3GS` (`strcmp("iPhone2,1")` en `applicationDidFinishLaunching`, usado en `UpdatePage`); los gráficos no dependen de él.
+- Pendiente de consola.
+
+## Iteración 039 (log 039 + psp2dmp 1795580321): crash al pasar a "sharp"; HUD sigue visible
+- Crash: data abort en SceGxm desde `glViewport` → `update_scissor_test` (vitaGL tests.c:334) al enlazar el FBO intermedio del filtro sharp, creado sin depth/stencil. Fix: renderbuffer `GL_DEPTH24_STENCIL8` en `pre_fbo`; `gles_present` además desactiva `GL_STENCIL_TEST` y `GL_CULL_FACE` (y los restaura).
+- El dump no lo encontraba `fetch_latest.py`: el módulo sale truncado como `princeofpersiawarriorwithi`. Agregado `"module_name"` en `.psvita-toolkit.json`.
+- HUD: con `touch controls hidden` los botones (arriba a la derecha: INO 0x80/0x40) seguían visibles → la página magma no es la que dibuja los controles, o no se llama. Diagnóstico: `[HUD] magma::PageStack::Draw hooked call #1` y volcado de UN frame al pulsar L+R (`[DUMP] ... tex= page= box=`; máx. 70 líneas) para ver qué draws son los controles.
+- Pendiente de consola.
+
+## Iteración 040 (log 040 + psp2dmp 1795580617 + 2 capturas)
+- Volcado de un frame (L+R): `magma::PageStack::Draw` no dibuja nada. Los controles son quads de arrays de cliente de una sola textura (tex 53: 177 vértices de (-9,-9) a (478,312) + 18 vértices en (37,59)-(82,86)) que vacía `_Mac_Flip` → `Mac_DoDrawRectangle(Ex)` al final del frame. Los encolan con `_Mac_DrawRectangle` los tres `DrawButton` virtuales (VirtualFanButton 0xae7e4, VirtualButton 0xae900, VirtualDirectionButton 0xaeb58 = joystick) y `_STR_Render` (texto, no se toca). Fix: hooks con trampolín genérico (`macho_code`: las 2 instrucciones del prólogo + salto a +8) que no encolan nada si `opt_hud_hidden`; el táctil (áreas de `TouchManager`) no cambia. Quitados el hook de PageStack y el volcado.
+- Capturas: título y carga de nivel dicen "TOCA LA PANTALLA PARA CONTINUAR". Fix: CROSS/START hacen un toque falso en el centro (4 frames) si `CMainGame::IsDrawLevelLoading()` (0xad34) o si el juego todavía no recibió ningún toque (pantalla de título), fuera de los videos. En esas pantallas CROSS/START no llegan como salto/pausa.
+- Crash sharp otra vez (mismo PC en SceGxm): `glDrawArrays` → `scene_reset` → `update_scissor_test` en el primer draw al FBO intermedio, también con depth/stencil. Hipótesis: textura 640x960 sin asignar (VRAM). Se quitó el depth/stencil (como Ferrari), se loguea la memoria libre de vitaGL y si `vglGetTexDataPointer` da NULL se vuelve a bilineal sin crashear.
+- Pendiente de consola.
+
+## Iteración 041 (log 041 + psp2dmp 1795581093)
+- Título con CROSS/START: OK en consola. Carga de nivel: no; `IsDrawLevelLoading` es `_s_isLevelLoading != 0 && != 2` y en "toca para continuar" vale 2. Ahora cualquier valor != 0 cuenta (símbolo `_s_isLevelLoading`, 0x6b918c); el estado se loguea con L+R para confirmar que en la partida es 0.
+- Ocultar: los hooks de `DrawButton` se instalaron pero no cambió nada → código muerto (`TouchManager::DrawButtons` es `bx lr`). Diagnóstico: con L+R se loguea un frame de `glDrawArrays` de arrays de cliente con la dirección del juego que llama (`[LR] ... guest_lr=`, solo se ve cuando `ml_align_call` salta directo).
+- Sharp: memoria de sobra (195 MB libres, VRAM 78 MB, FBO completo) y crash igual (SceGxm). Los tres crashes fueron al cambiar dentro del menú, donde el primer draw del frame tras `vglSwapBuffers` es el del FBO intermedio. Ahora el menú previsualiza en bilineal y el sharp se aplica al cerrarlo (orden normal: escena del juego → FBO intermedio → pantalla).
+- Pendiente de consola.
+
+## Iteración 042 (log 042 + psp2dmp 1795581463)
+- Carga: `_s_isLevelLoading` ya vale 0 en "toca para continuar"; esa pantalla es `_s_LevelLoadingEnd == 2` (`s_OneTrame` no llama a la actualización del juego mientras vale 2). Condición nueva: `_s_isLevelLoading != 0 || _s_LevelLoadingEnd == 2`; al pulsar se loguean ambos valores.
+- Ocultar: el diagnóstico de LR casi siempre dio 0 (pila desalineada, `ml_align_call` no deja el LR). Nuevo método en `gles.c`: se aprende la textura de los controles (primer lote GL_TRIANGLES de arrays de cliente, 60–600 vértices, cuya caja va de x<120 a x>360 y llega a y>240 dentro de la pantalla) y todo draw de arrays de cliente con esa textura va con `glColorMask` apagado. Si la textura se borra, se vuelve a aprender. Log: `[HUD] controls texture N learned`. Quitados los hooks de `DrawButton` (código muerto), el diagnóstico de LR y `macho_code`.
+- Sharp: crasheó también al cerrar el menú (orden normal) → no era el orden. vitaGL ignora un render target que no pudo crear. Se quitó el FBO intermedio: sharp bilinear es ahora un shader Cg (compilado en ejecución con libshacccg) en el blit final; si no compila → bilineal y `[WARN] sharp bilinear: ...`.
+- Pendiente de consola.
+
+## Iteración 043 (log 043 + psp2dmp 1795581794): crash al arrancar
+- `options.txt` tenía `filter=sharp`, así que el shader se compiló en el primer frame. Data abort en vitaGL `glsl_translator_process` → `glsl_handle_ubos`: con `HAVE_GLSL_UBOS` un `GL_*_SHADER` normal pasa por el traductor GLSL, que se rompe con fuente Cg (`uniform` en los parámetros de `main`). Fix: `glCreateShader(GL_CG_VERTEX_SHADER_EXT / GL_CG_FRAGMENT_SHADER_EXT)`, que compila Cg directo.
+- Protección: antes de compilar se guarda `filter=bilinear` en options.txt y solo tras compilar bien se vuelve a guardar `sharp`; si vuelve a crashear, el siguiente arranque es normal.
+- Pendiente de consola.
+
+## Iteración 044 (log 044): sharp, ocultar y carga funcionan
+- Confirmado en consola: sharp bilinear por shader Cg (`shader ready`), botones ocultos (`controls texture 53 learned`), pantalla de carga con CROSS/START (`loading 0, end 2`).
+- Se ocultaba demasiado: la textura 53 también tiene la salud y el arma (mismo lote de 177 vértices). Ahora se filtra por triángulo: se ocultan solo los que tienen el centro en `hud_spots` (joystick, saltar, bloquear, atacar, agarrar, dos botones arriba a la derecha y el icono de las arenas arriba a la izquierda); el resto se dibuja con `glDrawElements` sobre los mismos arrays. Log `[HUD] quad ... HIDDEN|shown` (64 por corrida) para ajustar.
+- START: había que tocar la pausa en pantalla; el pulso de 3 frames tras soltar no bastaba. Ahora 10 frames. Log `[INPUT] START -> INO bit 9` (primeras 6).
+- Pendiente de consola.
+
+## Iteración 045 (log 045 + captura 23:51): el círculo de vida/arenas se ocultaba en parte
+- `[HUD] quad`: el círculo de vida y arenas ocupa (27,27)-(103,99); el spot (60,72) r30 del "icono de las arenas" (que era parte del círculo) ocultaba la mitad. Quitado. Quedan: joystick, saltar, bloquear, atacar, agarrar y los dos botones de arriba a la derecha; la pausa (5,11)-(37,43) se ve.
+- Pendiente de consola (y START para pausar/reanudar).
+
+## Iteración 046 (log 046): FPS al ocultar, START, pantalla negra antes del título
+- Caída de FPS al pulsar L+R: las 64 líneas `[HUD] quad` (~9 ms cada una). Quitadas (los spots ya quedaron bien: círculo de vida `shown`).
+- START: el bit 9 llegaba (`START -> INO bit 9`), pero el juego solo pausa tras tocar el botón de pausa en pantalla. Ahora START en partida (`TouchManager+8 == 4`) hace un toque falso en la pausa (21,27) y no manda el bit. En el menú de pausa (modo 2) START sigue mandando el bit; se loguea `[INPUT] START (TouchManager mode N)`. Falta saber dónde está "Continuar" (captura del menú de pausa). En `OnFSCommand`, el `PauseGame(false)` con botones visibles es el comando "CustomInterface", no reanudar.
+- Pantalla negra antes del título: `video: could not start the decode thread` en el logo Gameloft.m4v en TODOS los logs desde el 035 (030–033 no). Regresión del menú: `px[480*272]` estático (~510 KB) en options.c; la pila de 512 KB del hilo de video ya no cabía. Ahora `px` se reserva con malloc solo con el menú abierto. UBISOFT/UBIMTL/LOGORP.m4v no existen ni en el IPA (falla igual en iOS).
+- Pendiente de consola.
+
+## Iteración 047 (log 047 + captura del menú de pausa): START y trofeos
+- START: `TouchManager+8` vale 2 también en partida (no 4), así que el toque nunca se mandaba. Ahora el menú MenuFX se detecta en `hook_EnGameswf_Render` (`fx == menu` → `s_menu_frames = 4`): con menú, START toca "CONTINUAR" (pantalla 480,172 = juego 240,86); sin menú, el botón de pausa (21,27). Log `[INPUT] START -> tap on ...`.
+- Trofeos (skill psvita-trophies, comm_id POPW00001, v01.10): 13 logros del juego en `_sul_Achievements[0]` (`Achievement_Is_Attend` 0xd8264 / `Achievement_Do_Attend` 0xd8744). Id del motor → logro como `EnGameswf::ShowArchivement`: 0..9 → 0..9, 11..13 → 10..12 (10 y 15 internos). Trofeo = logro + 1. Se sondea la máscara cada 60 frames desde el hook de joystick (también recupera logros de saves viejos). Nombres/descripciones de `text.EN.lang` ("ACHIEVEMENTS" y "UNLOCKED ACHIEVEMENT"). `Icon-NN.dat` son íconos del HUD, no de logros: se usa icon0. `trophies_init()` en el primer `gles_present` (hilo de render). TRP con hash OK dentro del VPK; NoTrpDrm está en `*main`.
+- Pendiente de consola: instalar el VPK completo (no solo eboot).
+
+## Iteración 049 (log 049): START OK, trofeos sin instalar
+- START confirmado en consola: en partida toca la pausa, con el menú toca CONTINUAR.
+- Trofeos: `TRP readable at app0:sce_sys/trophy/POPW00001_00/TROPHY.TRP` pero `sceNpTrophyInit failed: 0x80024302` (SCE_KERNEL_ERROR_NO_FREE_PHYSICAL_PAGE). El heap de newlib (192 MB) + vitaGL no dejaban memoria física al módulo NP. Fix: `_newlib_heap_size_user` 192 → 176 MB (vitaGL reportaba ~195 MB libres en partida). Subidos eboot.bin a la app y el VPK a downloads.
+- Pendiente de consola.
+
+## Iteración 050 (log 050): trofeos siguen con 0x80024302
+- Bajar el heap a 176 MB no cambió nada → revertido a 192 MB. Causa: `vglInitExtended` toma toda la RAM libre menos `ram_threshold` (8 MB), y vitaGL se inicializa ANTES de `macho_load` (imagen, hilos, FFmpeg salen de ese margen). Fix: `ram_threshold` 32 MB.
+- Pendiente de consola.

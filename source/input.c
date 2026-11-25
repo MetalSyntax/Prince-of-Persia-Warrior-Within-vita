@@ -8,6 +8,7 @@
 #include <psp2/touch.h>
 #include <string.h>
 
+#include "gles.h"
 #include "input.h"
 #include "log.h"
 #include "macho.h"
@@ -43,12 +44,14 @@ void input_poll(void) {
     if (touch_count > SCE_TOUCH_MAX_REPORT)
         touch_count = SCE_TOUCH_MAX_REPORT;
 
+    int dx, dw;
+    gles_dest_rect(&dx, &dw);
     for (int i = 0; i < touch_count; i++) {
         touches[i].id = t.report[i].id;
         touches[i].x = t.report[i].x / 2;
         touches[i].y = t.report[i].y / 2;
-        // Fullscreen: the 480x320 game image is stretched over the whole 960x544 screen (gles.c).
-        int gx = touches[i].x * 480 / 960;
+        // Inverse of the screen rectangle chosen in the options menu (gles.c): full screen or 816x544.
+        int gx = (touches[i].x - dx) * 480 / dw;
         int gy = touches[i].y * 320 / 544;
         touches[i].gx = gx < 0 ? 0 : gx > 479 ? 479 : gx;
         touches[i].gy = gy < 0 ? 0 : gy > 319 ? 319 : gy;

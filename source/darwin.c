@@ -442,7 +442,7 @@ static int d_usleep(unsigned us) {
 
 static int d_sysctlbyname(const char *name, void *oldp, size_t *oldlenp, void *newp, size_t newlen) {
     if (!strcmp(name, "hw.machine")) {
-        const char *model = "iPhone2,1"; // iPhone 3GS: game selects capable GLES1 texture profile
+        const char *model = options_machine(); // options menu "iPhone profile" (default iPhone2,1 = 3GS)
         size_t len = strlen(model) + 1;
         if (oldp && *oldlenp >= len)
             memcpy(oldp, model, len);

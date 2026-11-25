@@ -12,7 +12,7 @@ include("${VITASDK}/share/vita.cmake" REQUIRED)
 set(VITA_APP_NAME "Prince of Persia Warrior Within")
 set(VITA_TITLEID "PSVPOPWW1")
 set(VITA_VPKNAME "princeofpersiawarriorwithin")
-set(VITA_VERSION "01.00")
+set(VITA_VERSION "01.10")
 set(VITA_MKSFOEX_FLAGS "-d ATTRIBUTE2=12")
 set(PSVITAIP "192.168.3.15" CACHE STRING "PSVita IP")
 
@@ -90,6 +90,9 @@ add_executable(${CMAKE_PROJECT_NAME}
   source/vitagl_no_splash.c
   source/coreaudio.c
   source/input.c
+  source/options.c
+  source/trophies.c
+  source/font8x8.c
   source/cgbi.c
   source/openal.c
   source/patch.c
@@ -123,6 +126,7 @@ target_link_libraries(${CMAKE_PROJECT_NAME}
   SceTouch_stub
   SceDisplay_stub
   SceSysmodule_stub
+  SceNpTrophy_stub
   ScePower_stub
   SceKernelDmacMgr_stub
   SceGxm_stub
@@ -145,5 +149,6 @@ vita_create_vpk(${VITA_VPKNAME}.vpk ${VITA_TITLEID} eboot.bin
   FILE ${CMAKE_SOURCE_DIR}/extras/livearea/bg0.png sce_sys/livearea/contents/bg0.png
   FILE ${CMAKE_SOURCE_DIR}/extras/livearea/startup.png sce_sys/livearea/contents/startup.png
   FILE ${CMAKE_SOURCE_DIR}/extras/livearea/template.xml sce_sys/livearea/contents/template.xml
+  FILE ${CMAKE_SOURCE_DIR}/extras/trophy/POPW00001_00/TROPHY.TRP sce_sys/trophy/POPW00001_00/TROPHY.TRP
 )
 

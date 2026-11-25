@@ -17,17 +17,22 @@
 #include "hle.h"
 #include "imports.h"
 #include "log.h"
+#include "macho.h"
 #include "objc.h"
+#include "options.h"
+#include "trophies.h"
 
 #define FB_W 320
 #define FB_H 480
 #define SCR_W 960
 #define SCR_H 544
-// Fullscreen (as in Hero of Sparta II): the 480x320 game image is stretched to the whole 960x544
-// screen (x2 horizontally, x1.7 vertically). input.c maps touches with the same stretch.
-#define DST_H SCR_H
-#define DST_W SCR_W
-#define DST_X 0
+
+// Destination rectangle on screen (input.c maps touches back with it). Full screen (default, as in
+// Hero of Sparta II) stretches 480x320 to 960x544; original aspect is 816x544 centered (options.c).
+void gles_dest_rect(int *x, int *w) {
+    *w = opt_stretch ? SCR_W : SCR_H * FB_H / FB_W;
+    *x = (SCR_W - *w) / 2;
+}
 
 #define GL_FRAMEBUFFER_COMPLETE_OES 0x8CD5
 #define GL_RENDERBUFFER_WIDTH_OES 0x8D42
@@ -87,35 +92,25 @@ uint32_t gles_get_draw_calls(void) {
     return gles_draw_calls;
 }
 
-// gameswf render in progress: 1 = in-game HUD movie, 2 = MenuFX menu (pause etc.). Set by patch.c.
-int gles_in_swf;
-
-// ---------------------------------------------------------------- touch controls (L + R)
-// The on-screen controls are hidden at draw level like in Hero of Sparta II: in 2D (orthographic)
-// quad draws using a HUD texture, every quad sitting on a control (joystick, jump, block, attack,
-// grab; 480x320 game space, measured on console screenshots) collapses to a point. HUD textures are
-// learned from a square control-sized sprite centered on a control, so subtitles, menus and the
-// health/sand dial are never touched. Touch input is unaffected (read before drawing).
-int gles_hud_hidden = 1;
-static const struct { float x, y, r; } hud_spots[] = {
-    {77, 246, 58},  // virtual joystick (ring + arrows + knob travel)
-    {446, 174, 30}, // jump
-    {387, 221, 30}, // block (shield)
-    {340, 279, 30}, // attack (sword)
-    {458, 288, 32}, // grab (hand)
-};
-#define NSPOTS (sizeof(hud_spots) / sizeof(hud_spots[0]))
-static GLuint hud_tex[4];
-static float *hud_buf;
-static int hud_cap;
-
-static void g_glDeleteTextures(GLsizei n, const GLuint *ids) {
-    for (int k = 0; k < n; k++)
-        for (unsigned i = 0; i < 4; i++)
-            if (hud_tex[i] == ids[k])
-                hud_tex[i] = 0;
-    glDeleteTextures(n, ids);
+// patch.c: 0 % opacity for the on-screen touch controls (the draw still writes depth/stencil like the game expects).
+static int mask_off;
+static GLboolean saved_mask[4] = {GL_TRUE, GL_TRUE, GL_TRUE, GL_FALSE};
+void gles_color_mask_off(int on) {
+    mask_off = on;
+    if (on)
+        glColorMask(GL_FALSE, GL_FALSE, GL_FALSE, GL_FALSE);
+    else
+        glColorMask(saved_mask[0], saved_mask[1], saved_mask[2], GL_FALSE);
 }
+
+// ---------------------------------------------------------------- on-screen controls at 0 % opacity (L + R)
+// Logs 040-042: the controls are client-array GL_TRIANGLES batches of ONE texture drawn near the end of the frame
+// (box (-9,-9)-(478,312): joystick on the left, buttons on the right; plus small ones such as the pause button).
+// The texture is learned from the first batch whose screen box spans both sides inside the screen, then every
+// client-array draw with that texture is drawn with the color mask off (touch input does not depend on drawing).
+// A deleted texture is unlearned (level change). Logs 035-042 ruled out the earlier hooks (see patch.c).
+static GLuint hud_tex;
+static int hud_logs;
 
 static float vtx_get(int i, int c) {
     int es = vtx.type == GL_SHORT ? 2 : vtx.type == GL_BYTE ? 1 : 4;
@@ -128,168 +123,130 @@ static float vtx_get(int i, int c) {
     }
 }
 
-static int hud_spot(float cx, float cy) {
-    for (unsigned s = 0; s < NSPOTS; s++) {
+// Screen box of vertices [first, first + n) in 480x320 game space; 0 if a vertex is behind the camera.
+static int draw_box(int first, int n, float *b) {
+    float p[16], v[16];
+    glGetFloatv(GL_PROJECTION_MATRIX, p);
+    glGetFloatv(GL_MODELVIEW_MATRIX, v);
+    b[0] = b[1] = 1e9f, b[2] = b[3] = -1e9f;
+    for (int i = first; i < first + n; i++) {
+        float x = vtx_get(i, 0), y = vtx_get(i, 1), z = vtx.size > 2 ? vtx_get(i, 2) : 0, e[4], c[4];
+        for (int k = 0; k < 4; k++)
+            e[k] = v[k] * x + v[4 + k] * y + v[8 + k] * z + v[12 + k];
+        for (int k = 0; k < 4; k++)
+            c[k] = p[k] * e[0] + p[4 + k] * e[1] + p[8 + k] * e[2] + p[12 + k] * e[3];
+        if (c[3] <= 0)
+            return 0;
+        float gx = 240 * (1 - c[1] / c[3]), gy = 160 * (1 - c[0] / c[3]);
+        b[0] = gx < b[0] ? gx : b[0], b[2] = gx > b[2] ? gx : b[2];
+        b[1] = gy < b[1] ? gy : b[1], b[3] = gy > b[3] ? gy : b[3];
+    }
+    return 1;
+}
+
+// Log 044: the texture also holds the health and the held weapon (same 177-vertex batch), so only the triangles
+// whose centre sits on a control are hidden. Control spots in 480x320 game space (console screenshots/touch logs).
+static const struct { float x, y, r; } hud_spots[] = {
+    {77, 246, 58},  // virtual joystick (ring + arrows + knob travel)
+    {446, 174, 30}, // jump
+    {387, 221, 30}, // block (shield)
+    {340, 279, 30}, // attack (sword)
+    {458, 288, 32}, // grab (hand)
+    {466, 30, 22},  // top right: slow motion (touch log 039, INO 0x80)
+    {426, 33, 22},  // top right: INO 0x40 (log 039)
+    // nothing on the top left: the health / sands dial is there, (27,27)-(103,99) (log 045 + screenshot)
+};
+#define NSPOTS (int)(sizeof(hud_spots) / sizeof(hud_spots[0]))
+static uint16_t hud_idx[600];
+
+// Triangle centre (vertices first + k*3 .. +2) on a control spot?
+static int tri_on_control(const float *m, int v0) {
+    float cx = 0, cy = 0;
+    for (int i = v0; i < v0 + 3; i++) {
+        float x = vtx_get(i, 0), y = vtx_get(i, 1), z = vtx.size > 2 ? vtx_get(i, 2) : 0;
+        float c0 = m[0] * x + m[4] * y + m[8] * z + m[12], c1 = m[1] * x + m[5] * y + m[9] * z + m[13];
+        float c3 = m[3] * x + m[7] * y + m[11] * z + m[15];
+        if (c3 <= 0)
+            return 0;
+        cx += 240 * (1 - c1 / c3) / 3, cy += 160 * (1 - c0 / c3) / 3;
+    }
+    for (int s = 0; s < NSPOTS; s++) {
         float dx = cx - hud_spots[s].x, dy = cy - hud_spots[s].y;
         if (dx * dx + dy * dy <= hud_spots[s].r * hud_spots[s].r)
-            return s;
+            return 1;
     }
-    return -1;
+    return 0;
 }
 
-// ponytail: calibration log (log 032: nothing was hidden and no quad batch matched). Until a HUD
-// texture is learned, logs up to 24 small draws (<= 64 vertices; VBO, first and projection not
-// filtered) whose first vertex lands on a control, so the filter can be matched to how they draw.
-// ponytail: on-demand dump (log 033: still no [HUD] calib line). patch.c sets this on L + R; the next
-// frame logs every draw (80 max): shape, VBO, texture, projection kind and the bounding box of its
-// vertices in 480x320 game space, to see exactly how the touch controls are drawn.
-int gles_hud_dump;
-static void hud_dump(GLenum mode, GLint first, int n, int count, int indexed) {
-    static int lines;
-    if (gles_hud_dump != 1 || lines >= 80)
-        return;
-    lines++;
-    GLint ab = 0, t = 0;
-    float p[16], v[16];
-    glGetIntegerv(GL_ARRAY_BUFFER_BINDING, &ab);
-    glGetIntegerv(GL_TEXTURE_BINDING_2D, &t);
+// Draws a control-texture batch without the triangles on a control (0 % opacity); returns 0 to draw it as is.
+static int hud_draw_filtered(GLenum mode, int first, int count) {
+    if (mode != GL_TRIANGLES || count % 3 || count > (int)(sizeof(hud_idx) / sizeof(hud_idx[0])) || first + count > 0xffff)
+        return 0;
+    float p[16], v[16], m[16];
     glGetFloatv(GL_PROJECTION_MATRIX, p);
     glGetFloatv(GL_MODELVIEW_MATRIX, v);
-    float x0 = 1e9f, y0 = 1e9f, x1 = -1e9f, y1 = -1e9f;
-    if (!ab && vtx.ptr && vtx.size >= 2)
-        for (int i = first; i < n && i < first + 4096; i++) {
-            float x = vtx_get(i, 0), y = vtx_get(i, 1), z = vtx.size > 2 ? vtx_get(i, 2) : 0, e[4], c[4];
-            for (int k = 0; k < 4; k++)
-                e[k] = v[k] * x + v[4 + k] * y + v[8 + k] * z + v[12 + k];
-            for (int k = 0; k < 4; k++)
-                c[k] = p[k] * e[0] + p[4 + k] * e[1] + p[8 + k] * e[2] + p[12 + k] * e[3];
-            if (c[3] == 0)
-                continue;
-            float gx = 240 * (1 - c[1] / c[3]), gy = 160 * (1 - c[0] / c[3]);
-            x0 = gx < x0 ? gx : x0, x1 = gx > x1 ? gx : x1, y0 = gy < y0 ? gy : y0, y1 = gy > y1 ? gy : y1;
-        }
-    l_info("[HUD] dump: %s mode=%x first=%d verts=%d count=%d vfmt=%d/%x/%d vbo=%d tex=%d swf=%d pm15=%.2f box=(%d,%d)-(%d,%d)",
-           indexed ? "elems" : "arrays", mode, first, n, count, vtx.size, vtx.type, vtx.stride, ab, t, gles_in_swf, p[15],
-           (int)x0, (int)y0, (int)x1, (int)y1);
-}
-
-static void hud_calib(GLenum mode, GLint first, int n, int count) {
-    static int calib;
-    if (hud_tex[0] || calib >= 24 || !gles_hud_hidden || gles_in_swf == 2 || n > 64 || !vtx.size)
-        return;
-    GLint ab = 0, t = 0;
-    float p[16], v[16];
-    glGetIntegerv(GL_ARRAY_BUFFER_BINDING, &ab);
-    if (ab || !vtx.ptr) { // VBO: position unknown here, log the draw shape once per kind
-        static int vbo_logged;
-        if (vbo_logged++ < 4)
-            l_info("[HUD] calib: VBO draw mode=%x verts=%d count=%d vbo=%d swf=%d", mode, n, count, ab, gles_in_swf);
-        return;
-    }
-    glGetFloatv(GL_PROJECTION_MATRIX, p);
-    glGetFloatv(GL_MODELVIEW_MATRIX, v);
-    float x = vtx_get(first, 0), y = vtx_get(first, 1), z = vtx.size > 2 ? vtx_get(first, 2) : 0;
-    float e[4];
-    for (int i = 0; i < 4; i++)
-        e[i] = v[i] * x + v[4 + i] * y + v[8 + i] * z + v[12 + i];
-    float c[4];
-    for (int i = 0; i < 4; i++)
-        c[i] = p[i] * e[0] + p[4 + i] * e[1] + p[8 + i] * e[2] + p[12 + i] * e[3];
-    if (c[3] == 0)
-        return;
-    int gx = (int)(240 * (1 - c[1] / c[3])), gy = (int)(160 * (1 - c[0] / c[3]));
-    if (hud_spot(gx, gy) < 0)
-        return;
-    glGetIntegerv(GL_TEXTURE_BINDING_2D, &t);
-    calib++;
-    l_info("[HUD] calib: mode=%x first=%d verts=%d count=%d vfmt=%d/%x/%d tex=%d swf=%d pm11=%.2f pm15=%.2f v0 at (%d,%d)",
-           mode, first, n, count, vtx.size, vtx.type, vtx.stride, t, gles_in_swf, p[11], p[15], gx, gy);
-}
-
-// Returns the vertex array to draw with (hidden quads collapsed) or NULL to draw the game's own.
-static const void *hud_filter(GLenum mode, int n, int count) {
-    if (!gles_hud_hidden || gles_in_swf == 2 || !vtx.ptr || vtx.size < 2 || n > 4096)
-        return NULL;
-    if (n < 4 || (n & 3))
-        return NULL;
-    // Quad batches only: indexed triangles (6 indices per 4 vertices), 4-vertex strip/fan sprites.
-    if (!(mode == GL_TRIANGLES && count == n / 4 * 6) && !((mode == GL_TRIANGLE_STRIP || mode == GL_TRIANGLE_FAN) && n == 4))
-        return NULL;
-    GLint ab = 0, tex = 0;
-    glGetIntegerv(GL_ARRAY_BUFFER_BINDING, &ab);
-    if (ab)
-        return NULL;
-    float pm[16], mv[16], m[16];
-    glGetFloatv(GL_PROJECTION_MATRIX, pm);
-    if (pm[15] == 0) // perspective (3D scene)
-        return NULL;
-    glGetIntegerv(GL_TEXTURE_BINDING_2D, &tex);
-    int known = 0;
-    for (unsigned i = 0; i < 4; i++)
-        known |= tex && hud_tex[i] == (GLuint)tex;
-    glGetFloatv(GL_MODELVIEW_MATRIX, mv);
     for (int c = 0; c < 4; c++)
         for (int r = 0; r < 4; r++)
-            m[c * 4 + r] = pm[r] * mv[c * 4] + pm[4 + r] * mv[c * 4 + 1] + pm[8 + r] * mv[c * 4 + 2] + pm[12 + r] * mv[c * 4 + 3];
-    int hidden = 0;
-    for (int q = 0; q < n; q += 4) {
-        float x0 = 1e9f, y0 = 1e9f, x1 = -1e9f, y1 = -1e9f;
-        for (int i = q; i < q + 4; i++) {
-            float x = vtx_get(i, 0), y = vtx_get(i, 1), z = vtx.size > 2 ? vtx_get(i, 2) : 0;
-            float nx = m[0] * x + m[4] * y + m[8] * z + m[12], ny = m[1] * x + m[5] * y + m[9] * z + m[13];
-            // NDC -> 480x320 landscape game space (inverse of the blit in gles_present).
-            float gx = 240 * (1 - ny), gy = 160 * (1 - nx);
-            x0 = gx < x0 ? gx : x0, x1 = gx > x1 ? gx : x1, y0 = gy < y0 ? gy : y0, y1 = gy > y1 ? gy : y1;
-        }
-        float w = x1 - x0, h = y1 - y0, cx = (x0 + x1) / 2, cy = (y0 + y1) / 2;
-        if (w > 120 || h > 120)
-            continue;
-        int s = hud_spot(cx, cy);
-        if (s < 0)
-            continue;
-        if (!known) {
-            // Learn: a square control-sized sprite centered on a control.
-            float dx = cx - hud_spots[s].x, dy = cy - hud_spots[s].y;
-            if (!tex || w < 24 || h < 24 || w > 1.3f * h || h > 1.3f * w || dx * dx + dy * dy > 12 * 12)
-                continue;
-            for (unsigned i = 0; i < 4; i++)
-                if (!hud_tex[i]) {
-                    hud_tex[i] = tex;
-                    break;
-                }
-            known = 1;
-            l_info("[HUD] control texture %d learned from a %dx%d sprite at (%d,%d)", tex, (int)w, (int)h, (int)cx, (int)cy);
-            q = -4; // rescan this batch now that the texture is known
-            hidden = 0;
+            m[c * 4 + r] = p[r] * v[c * 4] + p[4 + r] * v[c * 4 + 1] + p[8 + r] * v[c * 4 + 2] + p[12 + r] * v[c * 4 + 3];
+    int n = 0, hidden = 0;
+    for (int t = first; t < first + count; t += 3) {
+        int on = tri_on_control(m, t);
+        if (on) {
+            hidden++;
             continue;
         }
-        if (!hidden) {
-            if (n * vtx.size > hud_cap) {
-                hud_cap = n * vtx.size;
-                hud_buf = realloc(hud_buf, hud_cap * sizeof(float));
-            }
-            for (int i = 0; i < n; i++)
-                for (int c = 0; c < vtx.size; c++)
-                    hud_buf[i * vtx.size + c] = vtx_get(i, c);
-        }
-        hidden++;
-        for (int i = q + 1; i < q + 4; i++)
-            memcpy(&hud_buf[i * vtx.size], &hud_buf[q * vtx.size], vtx.size * sizeof(float));
+        hud_idx[n++] = t, hud_idx[n++] = t + 1, hud_idx[n++] = t + 2;
     }
     if (!hidden)
-        return NULL;
-    glVertexPointer(vtx.size, GL_FLOAT, 0, hud_buf);
-    return hud_buf;
+        return 0;
+    if (n) {
+        GLint eb = 0;
+        glGetIntegerv(GL_ELEMENT_ARRAY_BUFFER_BINDING, &eb);
+        if (eb)
+            glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, 0);
+        glDrawElements(GL_TRIANGLES, n, GL_UNSIGNED_SHORT, hud_idx);
+        if (eb)
+            glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, eb);
+    }
+    return 1;
+}
+
+// 1 = this client-array batch uses the controls texture (and the controls are hidden).
+static int hud_hide(GLenum mode, int first, int count) {
+    if (!vtx.ptr || vtx.size < 2)
+        return 0;
+    GLint ab = 0, t = 0;
+    glGetIntegerv(GL_ARRAY_BUFFER_BINDING, &ab);
+    if (ab)
+        return 0;
+    glGetIntegerv(GL_TEXTURE_BINDING_2D, &t);
+    if (!hud_tex && t && mode == GL_TRIANGLES && count >= 60 && count <= 600) {
+        float b[4];
+        if (draw_box(first, count, b) && b[0] > -40 && b[1] > -40 && b[2] < 520 && b[3] < 360 && b[0] < 120 &&
+            b[2] > 360 && b[3] > 240) {
+            hud_tex = t;
+            l_info("[HUD] controls texture %d learned (%d vertices, box (%d,%d)-(%d,%d))", t, count, (int)b[0],
+                   (int)b[1], (int)b[2], (int)b[3]);
+        }
+    }
+    return opt_hud_hidden && hud_tex && (GLuint)t == hud_tex;
+}
+
+static void g_glDeleteTextures(GLsizei n, const GLuint *ids) {
+    for (int i = 0; i < n; i++)
+        if (hud_tex && ids[i] == hud_tex) {
+            if (hud_logs++ < 8)
+                l_info("[HUD] controls texture %d deleted: relearning", hud_tex);
+            hud_tex = 0;
+        }
+    glDeleteTextures(n, ids);
 }
 
 static void g_glDrawArrays(GLenum mode, GLint first, GLsizei count) {
     gles_draw_calls++;
-    hud_calib(mode, first, first + count, count);
-    hud_dump(mode, first, first + count, count, 0);
-    const void *h = first ? NULL : hud_filter(mode, count, count);
+    if (hud_hide(mode, first, count) && hud_draw_filtered(mode, first, count))
+        return;
     glDrawArrays(mode, first, count);
-    if (h)
-        apply_vertex();
 }
 
 static void g_glGetPointerv(GLenum pname, void **out) {
@@ -357,7 +314,12 @@ static void g_glGetRenderbufferParameterivOES(GLenum target, GLenum pname, GLint
 
 void gles_init(void) {
     vglUseTripleBuffering(GL_FALSE);
-    vglInitExtended(0, SCR_W, SCR_H, 8 * 1024 * 1024, SCE_GXM_MULTISAMPLE_NONE);
+    options_load(); // MSAA is fixed here (vitaGL applies it to the screen and every FBO)
+    // RAM left outside vitaGL: 32 MB (was 8). vitaGL is initialized before the Mach-O is loaded, so the image,
+    // thread stacks and FFmpeg come out of this margin too. Log 049-050: sceNpTrophyInit failed with 0x80024302
+    // (SCE_KERNEL_ERROR_NO_FREE_PHYSICAL_PAGE) with 8 MB; log 046: a 510 KB static buffer already broke the
+    // video decode thread. vitaGL had ~195 MB free in game (logs 041-042).
+    vglInitExtended(0, SCR_W, SCR_H, 32 * 1024 * 1024, options_msaa_mode());
     glGenTextures(1, &fbo_tex);
     glBindTexture(GL_TEXTURE_2D, fbo_tex);
     glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, FB_W, FB_H, 0, GL_RGBA, GL_UNSIGNED_BYTE, NULL);
@@ -378,18 +340,138 @@ void gles_init(void) {
     glClearColor(0, 0, 0, 1);
     glClear(GL_COLOR_BUFFER_BIT);
     glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_FALSE); // RGB565 semantics, see g_glColorMask
-    l_info("vitaGL: FBO %ux%u -> screen %ux%u at x=%d", FB_W, FB_H, DST_W, DST_H, DST_X);
+    int dx, dw;
+    gles_dest_rect(&dx, &dw);
+    l_info("vitaGL: FBO %ux%u -> screen %ux%u at x=%d", FB_W, FB_H, dw, SCR_H, dx);
+}
+
+// ---------------------------------------------------------------- scaling to screen (options.c picks the filter)
+// Sharp bilinear as a fragment shader on the final blit (same math as RetroArch's sharp-bilinear): each texel
+// stays a flat block and only the 1-pixel seams between texels are interpolated. Logs 039-042: the former
+// version (nearest x2 into an intermediate FBO, from Ferrari) crashed in SceGxm at its first draw into that FBO,
+// with plenty of memory and in any frame order (vitaGL ignores a failed render target); no FBO is used now.
+// Cg, compiled at runtime by vitaGL with libshacccg (already required for its fixed-function shaders).
+static const char sharp_vs[] =
+    "void main(float2 position, float2 texcoord, float2 out vTexcoord : TEXCOORD0, float4 out vPos : POSITION) {\n"
+    "  vPos = float4(position, 0.0, 1.0);\n"
+    "  vTexcoord = texcoord;\n"
+    "}\n";
+static const char sharp_fs[] =
+    "float4 main(float2 vTexcoord : TEXCOORD0, uniform sampler2D tex, uniform float2 texSize, uniform float2 scale) {\n"
+    "  float2 texel = vTexcoord * texSize;\n"
+    "  float2 base = floor(texel);\n"
+    "  float2 dist = frac(texel) - 0.5;\n"
+    "  float2 range = 0.5 - 0.5 / scale;\n"
+    "  float2 f = (dist - clamp(dist, -range, range)) * scale + 0.5;\n"
+    "  return tex2D(tex, (base + f) / texSize);\n"
+    "}\n";
+static GLuint sharp_prog;
+static GLint sharp_u_size, sharp_u_scale, sharp_u_tex;
+static int sharp_failed;
+
+static GLuint sharp_compile(GLenum type, const char *src) {
+    // Log 043: a plain GL_*_SHADER goes through vitaGL's GLSL translator, which crashed on this Cg source
+    // (glsl_handle_ubos); the Cg shader types are compiled as Cg directly.
+    GLuint sh = glCreateShader(type == GL_VERTEX_SHADER ? GL_CG_VERTEX_SHADER_EXT : GL_CG_FRAGMENT_SHADER_EXT);
+    GLint len = (GLint)strlen(src), ok = 0;
+    glShaderSource(sh, 1, &src, &len);
+    glCompileShader(sh);
+    glGetShaderiv(sh, GL_COMPILE_STATUS, &ok);
+    if (!ok) {
+        char msg[256] = "";
+        glGetShaderInfoLog(sh, sizeof(msg), NULL, msg);
+        l_warn("sharp bilinear: %s shader failed: %s", type == GL_VERTEX_SHADER ? "vertex" : "fragment", msg);
+        glDeleteShader(sh);
+        return 0;
+    }
+    return sh;
+}
+
+static int sharp_init(void) {
+    if (sharp_prog || sharp_failed)
+        return sharp_prog != 0;
+    // If compiling crashes (log 043), the next boot must not try again: options.txt says bilinear meanwhile.
+    opt_filter = FILTER_BILINEAR;
+    options_save();
+    GLuint vs = sharp_compile(GL_VERTEX_SHADER, sharp_vs), fs = vs ? sharp_compile(GL_FRAGMENT_SHADER, sharp_fs) : 0;
+    GLint ok = 0;
+    if (vs && fs) {
+        sharp_prog = glCreateProgram();
+        glAttachShader(sharp_prog, vs);
+        glAttachShader(sharp_prog, fs);
+        glBindAttribLocation(sharp_prog, 0, "position");
+        glBindAttribLocation(sharp_prog, 1, "texcoord");
+        glLinkProgram(sharp_prog);
+        glGetProgramiv(sharp_prog, GL_LINK_STATUS, &ok);
+    }
+    if (!ok) {
+        l_warn("sharp bilinear: shader not available, using bilinear");
+        sharp_failed = 1, sharp_prog = 0, opt_filter = FILTER_BILINEAR;
+        return 0;
+    }
+    sharp_u_size = glGetUniformLocation(sharp_prog, "texSize");
+    sharp_u_scale = glGetUniformLocation(sharp_prog, "scale");
+    sharp_u_tex = glGetUniformLocation(sharp_prog, "tex");
+    l_info("sharp bilinear: shader ready (uniforms %d %d %d)", sharp_u_size, sharp_u_scale, sharp_u_tex);
+    opt_filter = FILTER_SHARP;
+    options_save();
+    return 1;
+}
+
+// Draws the game FBO on the screen (FFP state already set up by gles_present).
+static void draw_screen(void) {
+    int dx, dw;
+    gles_dest_rect(&dx, &dw);
+    GLfloat cc[4]; // black side bars in original aspect, then back to the game's clear color
+    glGetFloatv(GL_COLOR_CLEAR_VALUE, cc);
+    glClearColor(0, 0, 0, 1);
+    glClear(GL_COLOR_BUFFER_BIT);
+    glClearColor(cc[0], cc[1], cc[2], cc[3]);
+    // Screen corners (top-left, top-right, bottom-left, bottom-right) -> portrait FBO texture,
+    // landscape-right rotation (top edge of FBO aligns to left edge of screen).
+    static const float uv[] = {1, 1, 1, 0, 0, 1, 0, 0};
+    glBindTexture(GL_TEXTURE_2D, fbo_tex);
+    if (opt_filter == FILTER_SHARP && sharp_init()) {
+        // corners in normalized device coordinates (y up)
+        static float ndc[8];
+        float x0 = dx * 2.0f / SCR_W - 1, x1 = (dx + dw) * 2.0f / SCR_W - 1;
+        float v[8] = {x0, 1, x1, 1, x0, -1, x1, -1};
+        memcpy(ndc, v, sizeof(v));
+        glUseProgram(sharp_prog);
+        glUniform1i(sharp_u_tex, 0);
+        glUniform2f(sharp_u_size, FB_W, FB_H);
+        // texture u (FB_W texels) runs along the screen height, v (FB_H texels) along the image width
+        glUniform2f(sharp_u_scale, (float)SCR_H / FB_W, (float)dw / FB_H);
+        glEnableVertexAttribArray(0);
+        glEnableVertexAttribArray(1);
+        glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 0, ndc);
+        glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 0, uv);
+        glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+        glUseProgram(0);
+        glEnableClientState(GL_VERTEX_ARRAY); // in case the generic attributes alias the fixed-function ones
+        glEnableClientState(GL_TEXTURE_COORD_ARRAY);
+        return;
+    }
+    const float xy[] = {dx, 0, dx + dw, 0, dx, SCR_H, dx + dw, SCR_H};
+    glVertexPointer(2, GL_FLOAT, 0, xy);
+    glTexCoordPointer(2, GL_FLOAT, 0, uv);
+    glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
 }
 
 void gles_present(void) {
-    if (gles_hud_dump)
-        gles_hud_dump++; // 1 = dumping this frame (set by L + R), then stop
-    if (gles_hud_dump > 2)
-        gles_hud_dump = 0;
-    static const GLenum caps[] = {GL_BLEND, GL_ALPHA_TEST, GL_SCISSOR_TEST, GL_DEPTH_TEST, GL_TEXTURE_2D};
-    GLboolean on[5], tca, va, ca, na;
-    GLint tex, mode, active, vp[4];
-    for (int i = 0; i < 5; i++)
+    static int trophies_ready;
+    if (!trophies_ready) { // psvita-trophies rule 6: on the rendering thread, before the first frame
+        trophies_ready = 1;
+        trophies_init();
+    }
+    static const GLenum caps[] = {GL_BLEND,      GL_ALPHA_TEST, GL_SCISSOR_TEST, GL_DEPTH_TEST,
+                                  GL_STENCIL_TEST, GL_CULL_FACE, GL_TEXTURE_2D};
+    enum { NCAPS = sizeof(caps) / sizeof(caps[0]) };
+    GLboolean on[NCAPS], tca, va, ca, na;
+    GLint tex, mode, active, vp[4], bsrc, bdst;
+    glGetIntegerv(GL_BLEND_SRC_RGB, &bsrc); // options.c draws its panel / FPS counter with alpha blending
+    glGetIntegerv(GL_BLEND_DST_RGB, &bdst);
+    for (int i = 0; i < NCAPS; i++)
         on[i] = glIsEnabled(caps[i]);
     glGetIntegerv(GL_ACTIVE_TEXTURE, &active);
     glActiveTexture(GL_TEXTURE0);
@@ -404,7 +486,7 @@ void gles_present(void) {
 
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
     glViewport(0, 0, SCR_W, SCR_H);
-    for (int i = 0; i < 4; i++)
+    for (int i = 0; i < NCAPS - 1; i++)
         glDisable(caps[i]);
     glEnable(GL_TEXTURE_2D);
     glEnableClientState(GL_VERTEX_ARRAY);
@@ -413,7 +495,6 @@ void gles_present(void) {
     glDisableClientState(GL_NORMAL_ARRAY);
     glColor4f(1.0f, 1.0f, 1.0f, 1.0f);
 
-    glBindTexture(GL_TEXTURE_2D, fbo_tex);
     glTexEnvi(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_REPLACE);
     glMatrixMode(GL_PROJECTION);
     glPushMatrix();
@@ -422,15 +503,10 @@ void gles_present(void) {
     glMatrixMode(GL_MODELVIEW);
     glPushMatrix();
     glLoadIdentity();
-    glClear(GL_COLOR_BUFFER_BIT);
-    // Screen corners (top-left, top-right, bottom-left, bottom-right) -> vertical FBO texture.
-    // Assumed landscape-right rotation (top edge of FBO aligns to left edge of screen).
-    // Adjust UV mapping table if target game renders mirrored or inverted.
-    static const float uv[] = {1, 1, 1, 0, 0, 1, 0, 0};
-    const float xy[] = {DST_X, 0, DST_X + DST_W, 0, DST_X, SCR_H, DST_X + DST_W, SCR_H};
-    glVertexPointer(2, GL_FLOAT, 0, xy);
-    glTexCoordPointer(2, GL_FLOAT, 0, uv);
-    glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+    draw_screen();
+    if (options_pending())
+        options_run(draw_screen); // modal: the game thread waits here (paused) until the menu closes
+    options_frame();              // FPS counter / 30 FPS limit
     vglSwapBuffers(ime_active()); // GL_TRUE while system dialog is active
 
     // Restore guest OpenGL state.
@@ -442,7 +518,8 @@ void gles_present(void) {
     glViewport(vp[0], vp[1], vp[2], vp[3]);
     glBindTexture(GL_TEXTURE_2D, tex);
     glTexEnvi(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, env_mode);
-    for (int i = 0; i < 5; i++)
+    glBlendFunc(bsrc, bdst);
+    for (int i = 0; i < NCAPS; i++)
         on[i] ? glEnable(caps[i]) : glDisable(caps[i]);
     if (!va)
         glDisableClientState(GL_VERTEX_ARRAY);
@@ -469,7 +546,11 @@ static void g_glClearColorx(GLfixed r, GLfixed g, GLfixed b, GLfixed a) {
 
 static void g_glClearColor(GLfloat r, GLfloat g, GLfloat b, GLfloat a) { glClearColor(r, g, b, 1.0f); }
 
-static void g_glColorMask(GLboolean r, GLboolean g, GLboolean b, GLboolean a) { glColorMask(r, g, b, GL_FALSE); }
+static void g_glColorMask(GLboolean r, GLboolean g, GLboolean b, GLboolean a) {
+    saved_mask[0] = r, saved_mask[1] = g, saved_mask[2] = b;
+    if (!mask_off) // gles_color_mask_off: the hidden HUD page keeps writing no color
+        glColorMask(r, g, b, GL_FALSE);
+}
 
 static void g_glTexEnvx(GLenum target, GLenum pname, GLfixed param) {
     if (pname == GL_TEXTURE_ENV_MODE)
@@ -480,38 +561,7 @@ static void g_glTexEnvx(GLenum target, GLenum pname, GLfixed param) {
 
 static void g_glDrawElements(GLenum mode, GLsizei count, GLenum type, const void *indices) {
     gles_draw_calls++;
-    const void *h = NULL;
-    GLint eb = 0;
-    float pm[16];
-    if (gles_hud_hidden) {
-        glGetIntegerv(GL_ELEMENT_ARRAY_BUFFER_BINDING, &eb);
-        glGetFloatv(GL_PROJECTION_MATRIX, pm);
-    }
-    // Index scan only for 2D (orthographic) draws, or small ones for the calibration log.
-    if (gles_hud_hidden && !eb && (pm[15] != 0 || (!hud_tex[0] && count <= 96)) && indices &&
-        (type == GL_UNSIGNED_SHORT || type == GL_UNSIGNED_BYTE)) {
-        int n = 0;
-        for (int i = 0; i < count; i++) {
-            int v = type == GL_UNSIGNED_BYTE ? ((const uint8_t *)indices)[i] : ((const uint16_t *)indices)[i];
-            if (v >= n)
-                n = v + 1;
-        }
-        hud_calib(mode, 0, n, count);
-        h = hud_filter(mode, n, count);
-    }
-    if (gles_hud_dump == 1) {
-        int n = 0;
-        if (!eb && indices && type != GL_UNSIGNED_INT)
-            for (int i = 0; i < count; i++) {
-                int v = type == GL_UNSIGNED_BYTE ? ((const uint8_t *)indices)[i] : ((const uint16_t *)indices)[i];
-                if (v >= n)
-                    n = v + 1;
-            }
-        hud_dump(mode, 0, n, count, 1);
-    }
     glDrawElements(mode, count, type, indices);
-    if (h)
-        apply_vertex();
 }
 
 // MacIndexBuffer::Init treats any error after glGenBuffers as "no VBO" and skips glBufferData,

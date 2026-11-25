@@ -7,6 +7,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 
 #include "hle.h"
 #include "imports.h"
@@ -17,6 +18,8 @@
 #include "patch.h"
 #include "video.h"
 #include "gles.h"
+#include "options.h"
+#include "trophies.h"
 #include "darwin_printf.h"
 #include <stdarg.h>
 
@@ -29,8 +32,11 @@ static uintptr_t s_touch_down = 0;
 static uintptr_t s_touch_move = 0;
 static uintptr_t s_touch_up = 0;
 
-static touch_point last_frame_touches[SCE_TOUCH_MAX_REPORT];
+static touch_point last_frame_touches[SCE_TOUCH_MAX_REPORT + 1];
 static int last_frame_touch_count = 0;
+static int s_menu_frames;
+static int s_fake_tap, s_fake_x = 240, s_fake_y = 160, s_game_touched; // fake tap (CROSS/START), see waits_for_tap()
+static volatile int s_is_movie_playing;
 
 // Addresses of hooked engine functions
 #define ADDR_INO_JOYSTICK_UPDATE   0x000aaba8
@@ -42,31 +48,42 @@ static int last_frame_touch_count = 0;
 #define ADDR_INO_GSL_CURRENT_STATE 0x006bf264
 #define ADDR_INO_GSL_PREV_STATE    0x006bf260
 
-// Configurable button mappings
-typedef struct {
-    uint32_t cross_action;
-    uint32_t square_action;
-    uint32_t triangle_action;
-    uint32_t circle_action;
-    uint32_t l1_action;
-    uint32_t r1_action;
-    uint32_t select_action;
-    uint32_t start_action;
-} control_config;
-
-static control_config s_cfg = {
-    .cross_action = (1 << 0),    // Jump (confirmed on console, log 027)
-    .square_action = (1 << 1),   // Drop weapon (confirmed)
-    .triangle_action = (1 << 2), // Attack (confirmed)
-    .circle_action = (1 << 3),   // Grab (confirmed)
-    .l1_action = (1 << 4),       // Time Rewind
+// Button mapping: each game action (INO bit) and the Vita button(s) that trigger it. The options menu
+// (options.c, SELECT+START) edits this table and saves it to controls.txt (one BUTTON = ACTION per line).
+static struct {
+    const char *name, *label;
+    uint32_t bit, buttons;
+} s_act[] = {
+    {"JUMP", "Jump", 1u << 0, SCE_CTRL_CROSS},           // confirmed on console (log 027)
+    {"DROP", "Drop weapon", 1u << 1, SCE_CTRL_SQUARE},   // confirmed
+    {"ATTACK", "Attack", 1u << 2, SCE_CTRL_TRIANGLE},    // confirmed
+    {"GRAB", "Grab weapon", 1u << 3, SCE_CTRL_CIRCLE},   // confirmed
+    {"REWIND", "Rewind time", 1u << 4, SCE_CTRL_LTRIGGER},
     // Block = bit 5: the shield is VirtualButton 11, one of the three round action buttons (5 attack,
     // 7 jump, 11 shield; inset rects in TouchManager::Init); ButtonKeyMap(7) = 11, and key 7 sets 0x20
-    // in _INO_Joystick_Update. Bit 6 (key 4 -> button 8) was a guess and blocked nothing.
-    .r1_action = (1 << 5),
-    .select_action = (1 << 7),   // Slow Motion
-    .start_action = (1 << 9),    // Pause / Menu
+    // in _INO_Joystick_Update. Confirmed on console (log 033: shield touch gives INO bits 0x0020).
+    {"BLOCK", "Block", 1u << 5, SCE_CTRL_RTRIGGER},
+    {"SLOWMO", "Slow motion", 1u << 7, SCE_CTRL_SELECT},
+    {"MENU", "Pause", 1u << 9, SCE_CTRL_START},
 };
+#define NACT (int)(sizeof(s_act) / sizeof(s_act[0]))
+
+int input_bind_count(void) { return NACT; }
+const char *input_bind_label(int i) { return s_act[i].label; }
+uint32_t input_bind_mask(int i) { return s_act[i].buttons; }
+void input_bind_set(int i, uint32_t mask) { s_act[i].buttons = mask; }
+
+void input_save_controls(void) {
+    FILE *f = fopen(DATA_PATH "controls.txt", "w");
+    if (!f)
+        return;
+    for (int i = 0; i < NACT; i++)
+        for (uint32_t m = 1; m; m <<= 1)
+            if (s_act[i].buttons & m && options_button_name(m))
+                fprintf(f, "%s = %s\n", options_button_name(m), s_act[i].name);
+    fclose(f);
+    l_info("[INPUT] controls.txt saved");
+}
 
 static void load_controls_config(void) {
     char path[128];
@@ -80,29 +97,58 @@ static void load_controls_config(void) {
     char line[128];
     while (fgets(line, sizeof(line), f)) {
         char btn[32], act[32];
-        if (sscanf(line, "%31s = %31s", btn, act) == 2) {
-            uint32_t mask = 0;
-            if (!strcasecmp(act, "JUMP")) mask = (1 << 0);
-            else if (!strcasecmp(act, "ATTACK")) mask = (1 << 2);
-            else if (!strcasecmp(act, "GRAB")) mask = (1 << 3);
-            else if (!strcasecmp(act, "DROP")) mask = (1 << 1);
-            else if (!strcasecmp(act, "BLOCK")) mask = (1 << 5);
-            else if (!strcasecmp(act, "REWIND")) mask = (1 << 4);
-            else if (!strcasecmp(act, "SLOWMO")) mask = (1 << 7);
-            else if (!strcasecmp(act, "MENU")) mask = (1 << 9);
-            else if (!strncasecmp(act, "BIT", 3)) mask = 1u << (atoi(act + 3) & 31); // raw INO bit, e.g. BIT5
-
-            if (!strcasecmp(btn, "CROSS")) s_cfg.cross_action = mask;
-            else if (!strcasecmp(btn, "SQUARE")) s_cfg.square_action = mask;
-            else if (!strcasecmp(btn, "TRIANGLE")) s_cfg.triangle_action = mask;
-            else if (!strcasecmp(btn, "CIRCLE")) s_cfg.circle_action = mask;
-            else if (!strcasecmp(btn, "L1") || !strcasecmp(btn, "L")) s_cfg.l1_action = mask;
-            else if (!strcasecmp(btn, "R1") || !strcasecmp(btn, "R")) s_cfg.r1_action = mask;
-            else if (!strcasecmp(btn, "SELECT")) s_cfg.select_action = mask;
-            else if (!strcasecmp(btn, "START")) s_cfg.start_action = mask;
+        if (sscanf(line, "%31s = %31s", btn, act) != 2)
+            continue;
+        uint32_t m = options_button_mask(btn), bit = 0;
+        if (!strncasecmp(act, "BIT", 3))
+            bit = 1u << (atoi(act + 3) & 31); // raw INO bit, e.g. BIT5
+        int a = -1;
+        for (int i = 0; i < NACT; i++)
+            if (!strcasecmp(act, s_act[i].name) || bit == s_act[i].bit)
+                a = i;
+        if (!m || a < 0) {
+            l_warn("[INPUT] controls.txt: ignored line '%s = %s'", btn, act);
+            continue;
         }
+        for (int i = 0; i < NACT; i++) // a button triggers a single action: the file line wins
+            s_act[i].buttons &= ~m;
+        s_act[a].buttons |= m;
     }
     fclose(f);
+}
+
+// Both buttons of a combo reach the game only after being held alone for 3 frames, so the combo never
+// leaks an action (L+R toggles the HUD: rewind/block; SELECT+START opens the menu: slow motion/pause).
+// A quick tap (released before 3 frames, without the other button) is sent for 3 frames after release:
+// log 037, a short START tap never paused. Returns 1 on the frame the combo is pressed.
+typedef struct {
+    uint32_t a, b;
+    int combo, fa, fb, pa, pb;
+} combo_gate;
+static int combo_filter(combo_gate *c, uint32_t *btn) {
+    int a = (*btn & c->a) != 0, b = (*btn & c->b) != 0, hit = 0;
+    // Log 044: a 3-frame pulse did not pause the game; 10 frames (~170 ms) is like a normal press.
+    if (!a && c->fa > 0 && c->fa < 3 && !c->combo)
+        c->pa = 10;
+    if (!b && c->fb > 0 && c->fb < 3 && !c->combo)
+        c->pb = 10;
+    c->fa = a ? c->fa + 1 : 0;
+    c->fb = b ? c->fb + 1 : 0;
+    if (a && b) {
+        hit = !c->combo;
+        c->combo = 1;
+    } else if (!a && !b) {
+        c->combo = 0;
+    }
+    if (c->combo || c->fa < 3)
+        *btn &= ~c->a;
+    if (c->combo || c->fb < 3)
+        *btn &= ~c->b;
+    if (c->pa > 0)
+        c->pa--, *btn |= c->a;
+    if (c->pb > 0)
+        c->pb--, *btn |= c->b;
+    return hit;
 }
 
 // The UITouch* the game gets from -touchesChanged: is an opaque per-finger identity: give each Vita
@@ -121,12 +167,28 @@ static void touch_dispatch(void) {
     }
     if (!s_touch_down)
         return;
+    static int s_fake_left; // fake tap frames still to send, for the touch-up
+    touch_point cur[SCE_TOUCH_MAX_REPORT + 1];
+    int n = touch_count;
+    memcpy(cur, touches, n * sizeof(cur[0]));
+    if (s_fake_tap) {
+        s_fake_left = 4, s_fake_tap = 0; // held 4 frames, then released
+        l_info("[INPUT] tap to continue (CROSS/START)");
+    }
+    if (s_fake_left > 0) {
+        s_fake_left--;
+        cur[n] = (touch_point){0};
+        cur[n].id = 99, cur[n].gx = s_fake_x, cur[n].gy = s_fake_y, cur[n].down = 1;
+        n++;
+    }
+    if (n)
+        s_game_touched = 1;
 
     // Dispatched down/move
-    for (int i = 0; i < touch_count; i++) {
+    for (int i = 0; i < n; i++) {
         int was_down = 0;
         for (int j = 0; j < last_frame_touch_count; j++) {
-            if (last_frame_touches[j].id == touches[i].id) {
+            if (last_frame_touches[j].id == cur[i].id) {
                 was_down = 1;
                 break;
             }
@@ -134,19 +196,19 @@ static void touch_dispatch(void) {
         if (!was_down) {
             static int logged;
             if (logged++ < 16)
-                l_info("[INPUT] touch down id=%d raw=%d,%d -> game %d,%d", touches[i].id, touches[i].x, touches[i].y,
-                       touches[i].gx, touches[i].gy);
-            call_guest((void *)s_touch_down, touches[i].gx, touches[i].gy, (uint32_t)touch_obj(touches[i].id), 0);
+                l_info("[INPUT] touch down id=%d raw=%d,%d -> game %d,%d", cur[i].id, cur[i].x, cur[i].y,
+                       cur[i].gx, cur[i].gy);
+            call_guest((void *)s_touch_down, cur[i].gx, cur[i].gy, (uint32_t)touch_obj(cur[i].id), 0);
         } else {
-            call_guest((void *)s_touch_move, touches[i].gx, touches[i].gy, (uint32_t)touch_obj(touches[i].id), 0);
+            call_guest((void *)s_touch_move, cur[i].gx, cur[i].gy, (uint32_t)touch_obj(cur[i].id), 0);
         }
     }
 
     // Dispatched up
     for (int j = 0; j < last_frame_touch_count; j++) {
         int still_down = 0;
-        for (int i = 0; i < touch_count; i++) {
-            if (touches[i].id == last_frame_touches[j].id) {
+        for (int i = 0; i < n; i++) {
+            if (cur[i].id == last_frame_touches[j].id) {
                 still_down = 1;
                 break;
             }
@@ -156,8 +218,55 @@ static void touch_dispatch(void) {
         }
     }
 
-    memcpy(last_frame_touches, touches, sizeof(touches));
-    last_frame_touch_count = touch_count;
+    memcpy(last_frame_touches, cur, n * sizeof(cur[0]));
+    last_frame_touch_count = n;
+}
+
+// On-screen touch controls hidden (L + R / options menu): done in gles.c (texture of the control batches drawn
+// at 0 % opacity). Logs 035-041 ruled out here: the AI "hide buttons" message (hides the whole interface), the
+// GFX interface items (deferred dials), magma::PageStack::Draw (draws nothing) and the virtual DrawButton
+// methods (dead code: TouchManager::DrawButtons is an empty function).
+
+// "TOCA LA PANTALLA PARA CONTINUAR" screens (title and level loading, screenshots 2026-11-24 23:23): CROSS or
+// START taps the screen centre there. Level loading = CMainGame::IsDrawLevelLoading() (0xad34). The title has no
+// such flag: it is the first screen that waits for a touch, so the rule holds until the game gets its first
+// touch (outside the logo movies, which CROSS skips on its own).
+// Level loading: _s_isLevelLoading != 0 while loading. Log 042: on the "touch to continue" screen it is already
+// 0; that screen is _s_LevelLoadingEnd == 2 (s_OneTrame skips the game update while it is 2).
+static int *s_level_loading, *s_level_loading_end;
+static int level_loading_state(void) {
+    if (!s_level_loading)
+        s_level_loading = (int *)macho_sym("_s_isLevelLoading"), s_level_loading_end = (int *)macho_sym("_s_LevelLoadingEnd");
+    return (s_level_loading && *s_level_loading) || (s_level_loading_end && *s_level_loading_end == 2);
+}
+
+static int waits_for_tap(void) {
+    if (s_is_movie_playing)
+        return 0;
+    return !s_game_touched || level_loading_state() != 0;
+}
+
+// Trophies (psvita-trophies, comm_id POPW00001): the game keeps its 13 achievements as bits of
+// _sul_Achievements[0] (Achievement_Is_Attend / Achievement_Do_Attend, 0xd8264 / 0xd8744; saved in the profile).
+// Engine id -> achievement as in EnGameswf::ShowArchivement: ids 0..9 -> 0..9, 11..13 -> 10..12 (10 and 15 are
+// internal, no popup). Trophy = achievement + 1 (0 = platinum, unlocked by the OS). Polling the mask about once a
+// second also brings in achievements earned before trophies existed (old saves).
+static void trophies_sync(void) {
+    static uint32_t *mask, done, tick;
+    if (++tick % 60)
+        return;
+    if (!mask)
+        mask = (uint32_t *)macho_sym("_sul_Achievements");
+    if (!mask)
+        return;
+    uint32_t m = *mask & 0x3bff & ~done; // ids 0..9 and 11..13
+    for (int id = 0; id < 14; id++)
+        if (m & (1u << id)) {
+            int trophy = id < 10 ? id + 1 : id; // 11..13 -> trophies 11..13 (achievements 10..12)
+            l_info("[TROPHY] achievement id %d -> trophy %d", id, trophy);
+            trophies_unlock(trophy);
+            done |= 1u << id;
+        }
 }
 
 // 1:1 reimplementation of _INO_Joystick_Update (0xaaba8) plus the Vita pad. The old hook replaced it with
@@ -193,43 +302,63 @@ static void hook_INO_Joystick_Update(void) {
         l_info("[INPUT] on-screen buttons -> INO bits 0x%04x", (unsigned)*cur);
     last_touch_bits = *cur;
 
-    // ponytail: pad -> INO bit meanings are the earlier guesses (controls.txt overrides); verify in game.
-    uint32_t btn_mask = 0;
-    if (pad.buttons & SCE_CTRL_CROSS)    btn_mask |= s_cfg.cross_action;
-    if (pad.buttons & SCE_CTRL_SQUARE)   btn_mask |= s_cfg.square_action;
-    if (pad.buttons & SCE_CTRL_TRIANGLE) btn_mask |= s_cfg.triangle_action;
-    if (pad.buttons & SCE_CTRL_CIRCLE)   btn_mask |= s_cfg.circle_action;
-    // L + R toggles the on-screen touch controls (hidden by default, gles.c), as in Hero of Sparta II.
-    // L1/R1 also carry actions (rewind/block), so each acts only after 3 frames held alone: pressing
-    // both for the toggle never leaks a rewind or block.
-    extern int gles_hud_hidden;
-    static int l_frames, r_frames, lr_combo;
     // Vita L/R are SCE_CTRL_LTRIGGER/RTRIGGER (0x100/0x200); SCE_CTRL_L1/R1 (0x400/0x800) only exist on
     // DS3/DS4 pads (PS TV). Log 032: checking only L1/R1 meant L, R and L + R never did anything.
-    int l = (pad.buttons & (SCE_CTRL_LTRIGGER | SCE_CTRL_L1)) != 0, r = (pad.buttons & (SCE_CTRL_RTRIGGER | SCE_CTRL_R1)) != 0;
-    static int l_seen, r_seen; // log 033 had no [HUD] toggle line: confirm L/R reach this hook
-    if (l && !l_seen++)
-        l_info("[INPUT] L pressed (pad 0x%08x)", (unsigned)pad.buttons);
-    if (r && !r_seen++)
-        l_info("[INPUT] R pressed (pad 0x%08x)", (unsigned)pad.buttons);
-    l_frames = l ? l_frames + 1 : 0;
-    r_frames = r ? r_frames + 1 : 0;
-    if (l && r) {
-        if (!lr_combo) {
-            gles_hud_hidden = !gles_hud_hidden;
-            l_info("[HUD] touch controls %s", gles_hud_hidden ? "hidden" : "visible");
-            extern int gles_hud_dump;
-            gles_hud_dump = 1; // gles.c: log the next frame's draws (calibration)
+    uint32_t b = pad.buttons;
+    static uint32_t raw_prev;
+    uint32_t pressed = b & ~raw_prev;
+    raw_prev = b;
+    if (waits_for_tap()) {
+        if (pressed & (SCE_CTRL_CROSS | SCE_CTRL_START)) {
+            s_fake_tap = 1, s_fake_x = 240, s_fake_y = 160;
+            l_info("[INPUT] CROSS/START on a touch-to-continue screen (loading %d, end %d, touched %d)",
+                   s_level_loading ? *s_level_loading : -1, s_level_loading_end ? *s_level_loading_end : -1,
+                   s_game_touched);
         }
-        lr_combo = 1;
-    } else if (!l && !r) {
-        lr_combo = 0;
+        b &= ~(SCE_CTRL_CROSS | SCE_CTRL_START); // no jump / pause on these screens
     }
-    if (!lr_combo && l_frames >= 3) btn_mask |= s_cfg.l1_action;
-    if (!lr_combo && r_frames >= 3) btn_mask |= s_cfg.r1_action;
-    if (pad.buttons & SCE_CTRL_SELECT)   btn_mask |= s_cfg.select_action;
-    if (pad.buttons & SCE_CTRL_START)    btn_mask |= s_cfg.start_action;
+    if (b & SCE_CTRL_L1)
+        b |= SCE_CTRL_LTRIGGER;
+    if (b & SCE_CTRL_R1)
+        b |= SCE_CTRL_RTRIGGER;
+    static combo_gate lr = {SCE_CTRL_LTRIGGER, SCE_CTRL_RTRIGGER}, menu = {SCE_CTRL_SELECT, SCE_CTRL_START};
+    if (combo_filter(&lr, &b)) { // L + R toggles the on-screen touch controls (hidden by default)
+        opt_hud_hidden = !opt_hud_hidden;
+        options_save();
+        l_info("[HUD] touch controls %s", opt_hud_hidden ? "hidden" : "visible");
+    }
+    if (combo_filter(&menu, &b))
+        options_open(); // gles_present runs the menu with the game paused
+    // START = tap: in game on the on-screen pause button (5,11)-(37,43) (log 046: the INO pause bit alone was
+    // ignored until that button had been touched once); with the MenuFX pause menu on screen on "CONTINUAR"
+    // (screenshot 2026-11-25 00:00: centre 480,172 on screen = 240,86). Log 047: TouchManager+8 is 2 both in
+    // game and paused, so the menu is detected from hook_EnGameswf_Render instead.
+    if (s_menu_frames)
+        s_menu_frames--;
+    trophies_sync();
+    static int prev_start, start_tapped;
+    int start = (b & SCE_CTRL_START) != 0;
+    if (start && !prev_start) {
+        static int logs;
+        if (logs < 8)
+            logs++, l_info("[INPUT] START -> tap on %s", s_menu_frames ? "CONTINUAR" : "pause button");
+        start_tapped = 1;
+        s_fake_tap = 1;
+        s_fake_x = s_menu_frames ? 240 : 21, s_fake_y = s_menu_frames ? 86 : 27;
+    }
+    prev_start = start;
+    if (!start)
+        start_tapped = 0;
+    if (start_tapped) // the tap pauses / resumes; do not also send the pause bit
+        b &= ~SCE_CTRL_START;
+    uint32_t btn_mask = 0;
+    for (int i = 0; i < NACT; i++)
+        if (b & s_act[i].buttons)
+            btn_mask |= s_act[i].bit;
     *cur |= btn_mask;
+    static int pause_logs;
+    if ((btn_mask & 0x200) && !(*prev & 0x200) && pause_logs < 6) // ponytail: verify START reaches the game
+        pause_logs++, l_info("[INPUT] START -> INO bit 9 (held mask 0x%08x)", (unsigned)*(uint32_t *)(MACHO_SLIDE + GSL_HELD_MASK));
 
     // Tail of the original: mask, forced-empty countdown, forced pause request.
     int32_t *hold = (int32_t *)(MACHO_SLIDE + GSL_HOLD_CNT);
@@ -340,7 +469,6 @@ void hook_Matrix4Mul(const float *a, const float *b, float *out) {
 // ---------------------------------------------------------------------------
 // Video Cutscene Playback Hooks (FFmpeg)
 // ---------------------------------------------------------------------------
-static volatile int s_is_movie_playing = 0;
 static char s_pending_movie[256] = {0};
 
 int hook_IsMoviePlaying(void) {
@@ -443,10 +571,9 @@ static void hook_EnGameswf_Render(uint8_t *self) {
         call_guest(set_orient, (uint32_t)alt, 1, 0, 0);
         call_guest6(set_vp, (uint32_t)alt, 0, 0, 320, 480, 0);
     }
-    extern int gles_in_swf;
-    gles_in_swf = fx == menu ? 2 : 1; // 2: menus are never touched by the HUD filter (gles.c)
+    if (fx == menu)
+        s_menu_frames = 4; // MenuFX on screen (pause menu); counted down by the joystick hook
     call_guest(fx_render, (uint32_t)fx, 0, 0, 0);
-    gles_in_swf = 0;
 }
 
 void patch_init(void) {

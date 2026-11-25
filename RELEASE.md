@@ -1,3 +1,70 @@
+# Prince of Persia: Warrior Within (PS Vita) — Beta Release v1.1.0
+
+Second public beta of the native iOS-to-PS Vita wrapper port of *Prince of Persia: Warrior Within* (iOS v1.0.7). It adds an in-game options menu, on-screen control toggling, native PS Vita trophies and a fixed intro video. The game is controllable with touch and physical buttons.
+
+## 📦 Release Package Contents
+
+- `princeofpersiawarriorwithin.vpk`: the loader (Title ID `PSVPOPWW1`, version `01.10`). Install the full VPK: the trophy set is inside it.
+- No game files are included. `rebase.bin` is still derived from your own copy of the game executable (see v1.0 notes below).
+
+## 🚀 Player Installation Guide
+
+1. **Requirements**: Enso 3.60/3.65, `ur0:tai/kubridge.skprx` under `*KERNEL`, and `libshacccg.suprx` in `ur0:data/`.
+2. **Trophies (optional)**: `ur0:tai/NoTrpDrm.suprx` under `*main` in `ur0:tai/config.txt`. Reboot the Vita after installing it.
+3. **Assets**: from your FairPlay-decrypted v1.0.7 `.ipa`, copy the contents of `Payload/<App>.app/` to `ux0:data/princeofpersiawarriorwithin/game_app/`. Put `rebase.bin` in `ux0:data/princeofpersiawarriorwithin/`.
+4. **Install** the full `princeofpersiawarriorwithin.vpk` with VitaShell.
+
+## 🎮 Controls
+
+| Input | Action | Status |
+| :---: | :--- | :---: |
+| **Touchscreen** | Original on-screen virtual pad and buttons | ✅ Working |
+| **Left stick / D-Pad** | Move | ✅ Working |
+| **Right stick** | Camera | ✅ Working |
+| **Cross** | Jump | ✅ Working |
+| **Triangle** | Attack | ✅ Working |
+| **Circle** | Grab | ✅ Working |
+| **Square** | Drop weapon | ✅ Working |
+| **Start** | Pause / menu; in the pause menu, taps **CONTINUAR** to resume | ✅ Working |
+| **Cross** or **Start** | Continue past the "TOUCH THE SCREEN TO CONTINUE" screens | ✅ Working |
+| **R** | Block | ✅ Working |
+| **L** | Time rewind | ⚠️ Unverified |
+| **L + R** | Show / hide the on-screen touch controls | ✅ Working |
+| **Select** | Slow motion | ⚠️ Unverified |
+| **Select + Start** | Options menu (see below) | ✅ Working |
+
+Options menu (Select + Start, game paused behind a translucent panel): button remap editor (saved to `controls.txt`), on-screen controls, screen size, screen filter, FPS counter, FPS limit, iPhone profile.
+
+## 📋 What's New in v1.1.0
+
+- **Options menu**: Select + Start opens the port options.
+  - **Button remap**: Jump, Drop weapon, Attack, Grab weapon, Rewind time, Block, Slow motion and Pause can be remapped; saved to `controls.txt`.
+  - **Screen size**: full screen (default) or original aspect (816x544).
+  - **Screen filter**: Bilinear or Sharp bilinear (sharp is a fragment shader on the final blit).
+  - **FPS counter** and **FPS limit** (off / 30).
+  - **iPhone profile**: hw.machine values iPhone 2G/3G/3GS (default) and iPod touch 2G/3G; applies after a restart. It only affects a menu flag in this game, not graphics. *Not verified on console.*
+  - Settings are saved to `ux0:data/princeofpersiawarriorwithin/options.txt`.
+- **On-screen controls**: L + R hides or shows the touch controls. They are hidden at 0% opacity; the health/sands dial, held weapon and pause button stay visible, and hidden controls still respond to touch.
+- **Pause and continue**: START pauses the game (taps the on-screen pause button) and resumes via CONTINUAR. CROSS or START also continue the "TOUCH THE SCREEN TO CONTINUE" screens on the title and level-loading screens.
+- **Trophies**: 13 trophies + platinum (Time Twister, Time Blocker, Warrior's Revenge, Warrior's Wrath, Triumph of Time, The Master of Technique, Falcon, Watery Embrace, God of Sand, Blessings of Sand, Ravaging Tempest, Lightspeed Runner, Don't Look Back), mapped from the game's own achievements, including ones already earned in an existing save.
+
+## 🐛 Fixes in v1.1.0
+
+- **Intro video**: the Gameloft intro video (black screen before the title) plays again.
+
+## ⚠️ Known Issues
+
+- **Trophies**: the trophy set installs on first launch, but individual unlocks are not verified on console yet.
+- **iPhone profile**: not verified on console; no graphics effect in this game.
+- **L / Select** mappings have not been confirmed in game.
+- **Cutscenes** play at ~14 FPS (software decoding; the hardware decoder fails to initialize).
+- **Online (GLLive)** features are not supported.
+- **UBISOFT / UBIMTL / LOGORP videos** do not exist in the iOS IPA either, so their absence is expected.
+
+Installation and build instructions: see [README.md](README.md).
+
+---
+
 # Prince of Persia: Warrior Within (PS Vita) — Beta Release v1.0
 
 First public beta of the native iOS-to-PS Vita wrapper port of *Prince of Persia: Warrior Within* (iOS v1.0.7). A custom Mach-O loader runs the original ARMv6 executable on the Vita. The game boots through intro videos and menus into gameplay at ~60 FPS, and is controllable with touch and physical buttons.

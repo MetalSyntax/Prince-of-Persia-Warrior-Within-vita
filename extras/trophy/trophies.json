@@ -1,0 +1,93 @@
+{
+  "comm_id": "POPW00001",
+  "title": "Prince of Persia Warrior Within",
+  "detail": "Prince of Persia Warrior Within PlayStation Vita Port",
+  "icon": "extras/livearea/icon0.png",
+  "banner": "extras/livearea/pic0.png",
+  "trophies": [
+    {
+      "ttype": "P",
+      "name": "Prince of Persia Warrior Within",
+      "detail": "Unlock all the other trophies.",
+      "hidden": false
+    },
+    {
+      "ttype": "G",
+      "name": "Time Twister",
+      "detail": "Use the Rewind Time feature less than 20 times.",
+      "hidden": false
+    },
+    {
+      "ttype": "G",
+      "name": "Time Blocker",
+      "detail": "Use the Slow Down Time feature less than 30 times.",
+      "hidden": false
+    },
+    {
+      "ttype": "S",
+      "name": "Warrior's Revenge",
+      "detail": "Kill 50 enemies by using counter attack.",
+      "hidden": false
+    },
+    {
+      "ttype": "B",
+      "name": "Warrior's Wrath",
+      "detail": "Kill 100 enemies.",
+      "hidden": false
+    },
+    {
+      "ttype": "G",
+      "name": "Triumph of Time",
+      "detail": "Finish the game.",
+      "hidden": false
+    },
+    {
+      "ttype": "S",
+      "name": "The Master of Technique",
+      "detail": "Complete all weapon combos.",
+      "hidden": false
+    },
+    {
+      "ttype": "B",
+      "name": "Falcon",
+      "detail": "Kill an enemy by throwing a weapon.",
+      "hidden": false
+    },
+    {
+      "ttype": "S",
+      "name": "Watery Embrace",
+      "detail": "Get 9 health bonuses.",
+      "hidden": false
+    },
+    {
+      "ttype": "S",
+      "name": "God of Sand",
+      "detail": "Get the Water Sword.",
+      "hidden": false
+    },
+    {
+      "ttype": "G",
+      "name": "Blessings of Sand",
+      "detail": "Reach a good ending.",
+      "hidden": false
+    },
+    {
+      "ttype": "G",
+      "name": "Ravaging Tempest",
+      "detail": "Finish the game in 5.5 hours.",
+      "hidden": false
+    },
+    {
+      "ttype": "S",
+      "name": "Lightspeed Runner",
+      "detail": "Never get caught by the Dahaka.",
+      "hidden": false
+    },
+    {
+      "ttype": "G",
+      "name": "Don't Look Back",
+      "detail": "Never retry the game.",
+      "hidden": false
+    }
+  ]
+}

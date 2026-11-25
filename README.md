@@ -17,19 +17,21 @@ An unofficial, native **iOS-to-PS Vita wrapper port** of *Prince of Persia: Warr
 
 ## 🎮 Status & Playability
 
-**Status: PLAYABLE (beta) (v01.00)**
+**Status: PLAYABLE (beta) (v01.10 · v1.1.0)**
 
 On physical hardware the game boots through intro videos and menus into gameplay, and is fully controllable with touch and physical buttons.
 
 - [x] **Mach-O Loader**: `__TEXT`/`__DATA` mapped at `0x98000000`, 2112/2112 external relocations, 10204 rebase words (from `rebase.bin`), 53 global constructors, 372 import thunks. *Verified on console.*
-- [x] **Graphics**: OpenGL ES 1.1 fixed-function → vitaGL. The 480x320 iOS framebuffer is rendered off-screen and stretched fullscreen to 960x544 (no black bars; touch is remapped to match). ~60 FPS in-game. *Verified on console.*
+- [x] **Graphics**: OpenGL ES 1.1 fixed-function → vitaGL. The 480x320 iOS framebuffer is rendered off-screen and stretched fullscreen to 960x544 (no black bars; touch is remapped to match). Fullscreen is the default; the original aspect (816x544) and the Bilinear / Sharp bilinear filters are selectable in the options menu. ~60 FPS in-game. *Verified on console.*
 - [x] **Menus (gameswf Flash UI)**: menus, language selection and tutorials render, including stencil-masked elements. *Verified on console.*
-- [x] **Touch & Controls**: front touchscreen drives the on-screen virtual pad and buttons. Physical buttons and both analog sticks are mapped. *Verified on console.*
+- [x] **Touch & Controls**: front touchscreen drives the on-screen virtual pad and buttons. Physical buttons and both analog sticks are mapped. L + R hides the on-screen controls (they still respond to touch), START pauses the game, and CROSS or START continue the "TOUCH THE SCREEN TO CONTINUE" screens. *Verified on console.*
 - [x] **Cutscenes**: `.m4v` movies decoded in software (FFmpeg) with AAC audio. They can be skipped with Cross, Circle or Start. *Verified on console.*
 - [x] **Audio**: OpenAL 1.1 (sound effects) and CoreAudio (streams) mapped to native Vita audio.
 - [x] **Saves**: the iOS `Documents/` folder is mapped to `ux0:data/princeofpersiawarriorwithin/saves/`.
 - [x] **Performance**: CPU 444 MHz, bus 222 MHz, GPU 222 MHz. VFP short-vector matrix routines replaced with native code.
 - [x] **Character rendering**: CPU-skinned models (the Prince) draw correctly; client vertex arrays are copied per draw. *Verified on console.*
+- [x] **Options menu** (Select + Start, game paused behind a translucent panel): button remap (saved to `controls.txt`), on-screen controls, screen size, filter, FPS counter/limit, iPhone profile (saved to `options.txt`). *Verified on console*, except the iPhone profile, which is not verified yet.
+- [x] **Trophies**: 13 trophies + platinum, mapped from the game's own achievements (including ones already earned in an existing save). The trophy set installs on first launch. *Installation verified on console; individual unlocks not verified yet.* Requires `NoTrpDrm.suprx` (see Setup).
 - [ ] **Online features (GLLive)**: not supported.
 
 ---
@@ -62,11 +64,13 @@ This software does NOT contain original game code, binaries, copyrighted graphic
      game_app/       contents of the .app folder (POP executable, .big/.MGM data, .m4v movies...)
      rebase.bin      rebase table generated in step 3
      controls.txt    optional — custom button mapping (see Controls)
+     options.txt     optional — screen, filter and FPS settings (see Controls)
      saves/          created automatically — your save games
      logs/           created automatically — one log per run
    ```
    `tools/stage_data.sh` builds this layout from the `.app` folder.
-5. **Install VPK**: install `princeofpersiawarriorwithin.vpk` (Title ID `PSVPOPWW1`) with VitaShell.
+5. **Install VPK**: install the full `princeofpersiawarriorwithin.vpk` (Title ID `PSVPOPWW1`) with VitaShell. The trophy set is inside the VPK (`sce_sys`), so the whole file must be installed.
+6. **Trophies (optional)**: add `ur0:tai/NoTrpDrm.suprx` under `*main` in `ur0:tai/config.txt`, then reboot the Vita.
 
 ---
 
@@ -81,20 +85,24 @@ This software does NOT contain original game code, binaries, copyrighted graphic
 | **Triangle** | Attack | ✅ Working |
 | **Circle** | Grab | ✅ Working |
 | **Square** | Drop weapon | ✅ Working |
-| **Start** | Pause / menu | ✅ Working |
+| **Start** | Pause / menu; in the pause menu, taps **CONTINUAR** to resume | ✅ Working |
+| **Cross** or **Start** | Continue past the "TOUCH THE SCREEN TO CONTINUE" screens (title and level loading) | ✅ Working |
 | **R** | Block | ✅ Working |
 | **L** | Time rewind | ⚠️ Unverified |
-| **L + R** | Show / hide the on-screen touch controls | ⚠️ Unverified |
+| **L + R** | Show / hide the on-screen touch controls (hidden controls still respond to touch) | ✅ Working |
 | **Select** | Slow motion | ⚠️ Unverified |
+| **Select + Start** | Port options menu (game paused behind a translucent panel): button remap, on-screen controls, screen size, filter, FPS counter/limit, iPhone profile | ✅ Working (iPhone profile not verified) |
 
 > [!TIP]
 > Buttons can be remapped with `ux0:data/princeofpersiawarriorwithin/controls.txt`, one `BUTTON = ACTION` per line.
-> Buttons: `CROSS SQUARE TRIANGLE CIRCLE L1 R1 SELECT START`. Actions: `JUMP ATTACK GRAB DROP BLOCK REWIND SLOWMO MENU`, or a raw input bit such as `BIT5`.
+> Buttons: `CROSS SQUARE TRIANGLE CIRCLE L1 R1 SELECT START` (`L` and `R` are also accepted). Actions: `JUMP ATTACK GRAB DROP BLOCK REWIND SLOWMO MENU`, or a raw input bit such as `BIT5`. The D-pad is not remappable.
 > ```
 > R1 = BLOCK
 > L1 = REWIND
 > ```
 > Blocking is always available through the on-screen shield button.
+>
+> The same changes can be made in-game: **Select + Start** opens the options menu, whose button editor writes `controls.txt`. Its other settings are saved to `ux0:data/princeofpersiawarriorwithin/options.txt` (`filter=bilinear|sharp`, `stretch=1|0`, `show_fps=0|1`, `fps_cap=0|30`, `hud_hidden=1|0`, `device=iPhone1,1|iPhone1,2|iPod2,1|iPhone2,1|iPod3,1`). `device` is the iPhone profile the game sees (iPhone 2G, iPhone 3G, iPod touch 2G, iPhone 3GS, iPod touch 3G; default 3GS); it applies after a restart. *Options menu verified on console; the iPhone profile is not verified yet.*
 
 ---
 
@@ -102,7 +110,9 @@ This software does NOT contain original game code, binaries, copyrighted graphic
 
 - **Cutscene frame rate**: movies are decoded in software (the hardware decoder fails to initialize) and play at ~14 FPS.
 - **L / Select mappings** have not been confirmed in game yet. L and R act after being held for 3 frames (~50 ms), so pressing L + R together never triggers a rewind or block.
-- **Hiding the touch controls** (L + R) does not work yet: the on-screen controls stay visible.
+- **Trophies**: the trophy set installs on first launch, but individual unlocks are not verified on console yet. Requires `NoTrpDrm.suprx` (see Setup).
+- **iPhone profile** (options menu): not verified on console; in this game it only affects a menu flag, not graphics.
+- **UBISOFT / UBIMTL / LOGORP videos**: these do not exist in the iOS IPA either, so their absence is expected and not a bug.
 - **Online features disabled**: the GLLive online services are not supported.
 - **Crash dumps** are written by the system to `ux0:data/` (not to the game folder).
 
