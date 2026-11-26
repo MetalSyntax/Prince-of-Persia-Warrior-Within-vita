@@ -9,6 +9,8 @@
  *          All imported gl* functions take only integer/pointer arguments (*x variants): no SoftFP issues.
  *          GL_FIXED vertex arrays are passed to vitaGL as-is (it converts them in the shader).
  */
+#include <png.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <vitaGL.h>
@@ -458,7 +460,63 @@ static void draw_screen(void) {
     glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
 }
 
+// The intro logos are UIImageViews (fake in objc.c) that updateTimerPages() shows for 420 and 250 frames:
+// 1st phase _s_showUBILogo + _ubiLogo, 2nd _s_showPlatform (until _s_showPlatformOver) + _platLogo.
+static int logo_phase(void) {
+    const uint8_t *f = (const uint8_t *)(MACHO_SLIDE + 0x6b92bd);   // _s_showPlatformOver, _s_showPlatform, _s_showUBILogo
+    const uint32_t *v = (const uint32_t *)(MACHO_SLIDE + 0x6ce2c4); // _ubiLogo, _platLogo
+    return f[2] && v[0] ? 1 : f[1] && !f[0] && v[1] ? 2 : 0;
+}
+int gles_logo_active(void) { return logo_phase(); }
+unsigned gles_presents;
+
+static void draw_logo(void) {
+    // ponytail: user's order (Forgotten Sands ad right after the video, then UBILogo); the binary pairs them the other way.
+    static const char *names[] = {NULL, "PlatformLogo", "UBILogo"};
+    static GLuint ltex[3];
+    static int tried[3];
+    int p = logo_phase();
+    if (!p) {
+        for (int i = 1; i < 3; i++)
+            if (ltex[i])
+                glDeleteTextures(1, &ltex[i]), ltex[i] = 0;
+        return;
+    }
+    if (!tried[p]) {
+        tried[p] = 1;
+        char path[256];
+        snprintf(path, sizeof(path), "%s%s.dat", BUNDLE_PATH, names[p]); // plain PNG despite the extension
+        png_image img = {.version = PNG_IMAGE_VERSION};
+        if (png_image_begin_read_from_file(&img, path)) {
+            img.format = PNG_FORMAT_RGBA;
+            void *px = malloc(PNG_IMAGE_SIZE(img));
+            if (px && png_image_finish_read(&img, NULL, px, 0, NULL)) {
+                glGenTextures(1, &ltex[p]);
+                glBindTexture(GL_TEXTURE_2D, ltex[p]);
+                glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+                glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+                glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, img.width, img.height, 0, GL_RGBA, GL_UNSIGNED_BYTE, px);
+            }
+            png_image_free(&img);
+            free(px);
+        }
+        l_info("[LOGO] %s: %s (%ux%u)", path, ltex[p] ? "shown" : "could not load", img.width, img.height);
+    }
+    if (!ltex[p])
+        return;
+    int dx, dw;
+    gles_dest_rect(&dx, &dw);
+    // Portrait PNG (row 0 on top) rotated like the FBO in draw_screen: its right edge becomes the screen top.
+    static const float uv[] = {1, 0, 1, 1, 0, 0, 0, 1};
+    const float xy[] = {dx, 0, dx + dw, 0, dx, SCR_H, dx + dw, SCR_H};
+    glBindTexture(GL_TEXTURE_2D, ltex[p]);
+    glVertexPointer(2, GL_FLOAT, 0, xy);
+    glTexCoordPointer(2, GL_FLOAT, 0, uv);
+    glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+}
+
 void gles_present(void) {
+    gles_presents++;
     static int trophies_ready;
     if (!trophies_ready) { // psvita-trophies rule 6: on the rendering thread, before the first frame
         trophies_ready = 1;
@@ -504,6 +562,7 @@ void gles_present(void) {
     glPushMatrix();
     glLoadIdentity();
     draw_screen();
+    draw_logo();
     if (options_pending())
         options_run(draw_screen); // modal: the game thread waits here (paused) until the menu closes
     options_frame();              // FPS counter / 30 FPS limit

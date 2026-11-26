@@ -422,6 +422,9 @@ typedef struct {
     uint64_t period_us, next_us;
     int repeats;
 } ns_timer;
+extern unsigned gles_presents;
+int gles_logo_active(void);
+void gles_present(void);
 static ns_timer s_timers[4];
 static int s_timer_count;
 
@@ -444,8 +447,22 @@ static void timers_fire(void) {
             l_info("[OBJC] timer %s fire #%d imp=%p showLogo=%d UBI=%d plat=%d platOver=%d", t->sel, fired - 1,
                    (void *)imp, f[7], f[2], f[1], f[0]);
         }
+        // updateTimerPages counts logo time in frames (_s_timer == 420 / 250); loading drops the loop to
+        // ~17 fps (log 052: 35 s instead of 11 s), so advance _s_timer by the 60 Hz frames really elapsed.
+        static uint64_t logo_last;
+        int phase = gles_logo_active();
+        if (phase && logo_last) {
+            int *ctr = (int *)(MACHO_SLIDE + 0x6b92c0), lim = phase == 1 ? 420 : 250;
+            int extra = (int)((now - logo_last) / 16667) - 1; // draw itself adds one
+            if (extra > 0)
+                *ctr = *ctr + extra < lim - 1 ? *ctr + extra : lim - 1;
+        }
+        logo_last = phase ? now : 0;
+        unsigned presents = gles_presents;
         if (imp)
             call_guest((void *)imp, (uint32_t)t->target, (uint32_t)t->sel, 0, 0);
+        if (presents == gles_presents && gles_logo_active())
+            gles_present(); // draw may not present while the logo UIImageView covers the screen
         if (!t->repeats)
             t->target = NULL;
     }

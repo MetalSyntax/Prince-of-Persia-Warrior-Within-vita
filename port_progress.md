@@ -590,3 +590,16 @@ To test the port on physical PlayStation Vita hardware:
 ## Iteración 050 (log 050): trofeos siguen con 0x80024302
 - Bajar el heap a 176 MB no cambió nada → revertido a 192 MB. Causa: `vglInitExtended` toma toda la RAM libre menos `ram_threshold` (8 MB), y vitaGL se inicializa ANTES de `macho_load` (imagen, hilos, FFmpeg salen de ese margen). Fix: `ram_threshold` 32 MB.
 - Pendiente de consola.
+
+## Iteración 052 (log 051): pantalla negra = logos UIImageView sin dibujar
+- Tras Gameloft.m4v, `updateTimerPages()` muestra dos UIImageView: fase `_s_showUBILogo` + `_ubiLogo` (420 frames) y fase `_s_showPlatform` + `_platLogo` (250 frames, hasta `_s_showPlatformOver`). En objc.c esas vistas son falsas y el parche que dejaba las esperas en 2 frames tapaba el problema.
+- `PlatformLogo.dat` = anuncio "PoP The Forgotten Sands" y `UBILogo.dat` = Ubisoft + legal (PNG normales 320x480 en vertical).
+- Fix: `draw_logo()` en gles.c decodifica el PNG con libpng y lo dibuja girado igual que el FBO; objc.c presenta un frame si `draw` no lo hizo durante el logo. Quitado el parche de 2 frames (vuelven los tiempos originales de 7 s y 4 s).
+- Orden que pidió el usuario: video → Forgotten Sands → UBILogo → título (el binario los empareja al revés: UBI primero). Para invertirlo, cambiar `names[]` en `draw_logo`.
+- Subidos eboot.bin a la app y el VPK a downloads. Pendiente de consola: línea `[LOGO] ... shown` en el log.
+
+## Iteración 053 (log 052): logos OK, pero duran ~35 s
+- `[LOGO] ... shown` para ambas imágenes en consola. Pero `updateTimerPages` cuenta frames en `_s_timer` (0x6b92c0) hasta 420 / 250 y, mientras el juego carga, el bucle va a ~17 fps: Forgotten Sands 13,6→34,5 s y UBILogo 34,5→~49 s.
+- Fix (objc.c `timers_fire`): con un logo en pantalla, adelanta `_s_timer` según los frames de 60 Hz que pasaron de verdad (tope lim-1), así vuelven a durar ~7 s + ~4,2 s como en iOS.
+- Otros tiempos sin tocar: ~1,2 s de `trophies_init` + ~2,7 s de init del juego entre el fin del video y el primer logo.
+- Subidos eboot.bin a la app y el VPK a downloads. Pendiente de consola.

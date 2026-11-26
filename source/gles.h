@@ -15,6 +15,10 @@ void gles_init(void);
  */
 void gles_present(void);
 
+/** @brief Frames presented so far, and the intro logo phase on screen (0 none, 1 first, 2 second). */
+extern unsigned gles_presents;
+int gles_logo_active(void);
+
 /**
  * @brief Returns the total number of draw calls dispatched this session.
  */

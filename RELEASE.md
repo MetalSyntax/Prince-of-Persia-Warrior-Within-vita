@@ -1,10 +1,10 @@
-# Prince of Persia: Warrior Within (PS Vita) — Beta Release v1.1.0
+# Prince of Persia: Warrior Within (PS Vita) — Beta Release v1.1.1
 
 Second public beta of the native iOS-to-PS Vita wrapper port of *Prince of Persia: Warrior Within* (iOS v1.0.7). It adds an in-game options menu, on-screen control toggling, native PS Vita trophies and a fixed intro video. The game is controllable with touch and physical buttons.
 
 ## 📦 Release Package Contents
 
-- `princeofpersiawarriorwithin.vpk`: the loader (Title ID `PSVPOPWW1`, version `01.10`). Install the full VPK: the trophy set is inside it.
+- `princeofpersiawarriorwithin.vpk`: the loader (Title ID `PSVPOPWW1`, version `01.11`). Install the full VPK: the trophy set is inside it.
 - No game files are included. `rebase.bin` is still derived from your own copy of the game executable (see v1.0 notes below).
 
 ## 🚀 Player Installation Guide
@@ -34,6 +34,13 @@ Second public beta of the native iOS-to-PS Vita wrapper port of *Prince of Persi
 | **Select + Start** | Options menu (see below) | ✅ Working |
 
 Options menu (Select + Start, game paused behind a translucent panel): button remap editor (saved to `controls.txt`), on-screen controls, screen size, screen filter, FPS counter, FPS limit, iPhone profile.
+
+## 📋 What's New in v1.1.1
+
+- Intro logo screens are now drawn: after the Gameloft video, the "Prince of Persia: The Forgotten Sands" ad image appears, then the Ubisoft legal screen, then the title. Before, these showed a black screen.
+- Logo screens last their original iOS time (~7 s and ~4 s), now timed in real time. Frame counting had stretched them to ~35 s total because the loop drops to ~17 fps while loading.
+- Removed the old workaround that cut the logo waits to 2 frames.
+- Verified on PS Vita console. VPK version 01.11; install over v1.1.0, game data unchanged.
 
 ## 📋 What's New in v1.1.0
 

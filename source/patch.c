@@ -615,15 +615,7 @@ void patch_init(void) {
     macho_hook_addr(MACHO_SLIDE + 0x0002bfc8, hook_StopMovie);
     macho_hook_addr(MACHO_SLIDE + 0x0002cf68, hook_IsMoviePlaying);
     l_info("[PATCH] Cutscene video playback hooks installed.");
-    // updateTimerPages() holds the UBI logo view 420 frames and the platform logo 250 frames before
-    // _s_showPlatformOver -> menu_TouchScreen. Those UIImageViews are fake here (nothing is drawn), so
-    // the wait is ~11 s of blank screen: shorten both to 2 frames (cmp #420, cmp #250 / sub #250).
-    static const struct { uint32_t off, insn; } logo_wait[] = {
-        {0x1f7a8, 0xE3530002}, {0x1f894, 0xE3530002}, {0x1f89c, 0xE2433002}};
-    for (unsigned i = 0; i < sizeof(logo_wait) / sizeof(*logo_wait); i++) {
-        kuKernelCpuUnrestrictedMemcpy((void *)(MACHO_SLIDE + logo_wait[i].off), &logo_wait[i].insn, 4);
-        kuKernelFlushCaches((void *)(MACHO_SLIDE + logo_wait[i].off), 4);
-    }
+    // updateTimerPages() keeps its original logo waits (420 + 250 frames): gles.c draws both images.
     macho_hook_addr(MACHO_SLIDE + 0x004ec368, hook_EnGameswf_Render);
     macho_hook_addr(MACHO_SLIDE + 0x005614b4, hook_swf_log_error);
     macho_hook_addr(MACHO_SLIDE + 0x00561448, hook_swf_log_msg);

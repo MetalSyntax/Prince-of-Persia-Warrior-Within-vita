@@ -12,7 +12,7 @@ include("${VITASDK}/share/vita.cmake" REQUIRED)
 set(VITA_APP_NAME "Prince of Persia Warrior Within")
 set(VITA_TITLEID "PSVPOPWW1")
 set(VITA_VPKNAME "princeofpersiawarriorwithin")
-set(VITA_VERSION "01.10")
+set(VITA_VERSION "01.11")
 set(VITA_MKSFOEX_FLAGS "-d ATTRIBUTE2=12")
 set(PSVITAIP "192.168.3.15" CACHE STRING "PSVita IP")
 
